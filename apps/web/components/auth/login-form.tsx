@@ -1,7 +1,6 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { GithubIcon, GoogleIcon } from "@/components/icons/hugeicons";
@@ -818,24 +817,16 @@ export function LoginForm({
                       </>
                     )}
 
-                    {/* the consent sits with the action it applies to */}
-                    <p className="text-center text-xs leading-5 text-muted-foreground">
-                      By continuing you agree to our{" "}
-                      <Link
-                        className="underline underline-offset-2 hover:text-foreground"
-                        href="/terms"
-                      >
-                        Terms
-                      </Link>{" "}
-                      and{" "}
-                      <Link
-                        className="underline underline-offset-2 hover:text-foreground"
-                        href="/privacy"
-                      >
-                        Privacy Policy
-                      </Link>
-                      .
-                    </p>
+                    {/* No consent line here, and its absence is the point.
+                        This build is what a self-hoster runs on their own
+                        hardware: there is no service on the other side of the
+                        agreement, `/terms` and `/privacy` are marketing pages
+                        that ship with the hosted product rather than with the
+                        software, and a sentence promising terms behind a link
+                        that answers 404 is worse than no sentence. What the
+                        software actually does with visitor data is documented
+                        at /docs/privacy, which is a description rather than a
+                        contract. */}
                   </motion.div>
                 )}
               </AnimatePresence>

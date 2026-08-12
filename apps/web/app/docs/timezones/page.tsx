@@ -52,8 +52,8 @@ export default function TimezonesDocsPage() {
           everywhere, deliberately: letting a site pick the rotation clock
           would split visitors at local midnight and make sites comparable
           by their timezone choice. Reporting clocks change how numbers are
-          bucketed, never how people are counted. Details in the{" "}
-          <DocLink href="/privacy">Privacy Policy</DocLink>.
+          bucketed, never how people are counted. Details under{" "}
+          <DocLink slug="privacy">Privacy and consent</DocLink>.
         </DocNote>
       </DocSection>
     </DocArticle>

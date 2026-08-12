@@ -19,8 +19,8 @@ export default function DocsIndexPage() {
           fingerprinting and no personal data anywhere in between. Visitors
           are counted with an identifier that expires every day and differs
           on every site, so nobody can be followed, including by us. The
-          full construction is public in our{" "}
-          <DocLink href="/privacy">Privacy Policy</DocLink>; the short
+          full construction is written out under{" "}
+          <DocLink slug="privacy">Privacy and consent</DocLink>; the short
           version is that privacy here is a design property, not a setting.
         </p>
         <p>

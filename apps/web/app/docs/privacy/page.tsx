@@ -21,9 +21,10 @@ export default function PrivacyDocsPage() {
           The tracker sets no cookies, stores nothing on the visitor&apos;s
           device, never keeps a raw IP address, and counts visitors with a
           keyed hash that expires at UTC midnight and differs on every site.
-          These are design properties of the software, not policies; the
-          full construction, with every exception named, is in the{" "}
-          <DocLink href="/privacy">Privacy Policy</DocLink>.
+          These are design properties of the software, not policies: they
+          hold because of how the tracker and the collector are built, so
+          they hold on your deployment without you configuring anything.
+          Every exception is named further down this page.
         </p>
       </DocSection>
 
