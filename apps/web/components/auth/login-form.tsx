@@ -241,6 +241,25 @@ export function LoginForm({
     available !== null && available.includes(id);
 
   /**
+   * Whether the deployment can be claimed *here*, on this form.
+   *
+   * Claiming writes an email and a password, so it needs the password
+   * endpoints mounted — the deployment decides that, and the api reports the
+   * decision by listing `password` among the providers. Where they are not
+   * mounted the setup route still exists and still answers, but the sign-up
+   * inside it fails and the caller is told the deployment is already claimed,
+   * which is the opposite of true. So the form is offered only where it can
+   * succeed.
+   *
+   * The deployment is no less claimable for it: whoever signs in first is the
+   * first account whichever door they came through, so the ordinary doors are
+   * offered instead, under a heading that says what signing in will do.
+   */
+  const canClaim = setupRequired && offers("password");
+  const claimBlocked =
+    setupRequired && available !== null && !offers("password");
+
+  /**
    * Strip the error out of the address bar once it has been rendered, so a
    * refresh does not resurrect a failure the person has already read. The
    * message stays — it lives in state now, not in the URL.
@@ -541,14 +560,18 @@ export function LoginForm({
                   >
                     <div>
                       <h1 className="text-base font-medium tracking-tight">
-                        {setupRequired
+                        {canClaim
                           ? "Create the first account"
-                          : "Welcome back!"}
+                          : claimBlocked
+                            ? "Claim this deployment"
+                            : "Welcome back!"}
                       </h1>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {setupRequired
+                        {canClaim
                           ? "Nobody has signed into this deployment yet. Whoever claims it first owns it, so do this now."
-                          : "Sign in with your account or continue with a provider."}
+                          : claimBlocked
+                            ? "Nobody has signed into this deployment yet. Whoever signs in first owns it, so do this now."
+                            : "Sign in with your account or continue with a provider."}
                       </p>
                     </div>
 
@@ -567,7 +590,7 @@ export function LoginForm({
                         <span className="h-10 animate-pulse rounded-xl bg-muted-foreground/10" />
                         <span className="h-10 animate-pulse rounded-xl bg-muted-foreground/10" />
                       </div>
-                    ) : setupRequired ? (
+                    ) : canClaim ? (
                       /* One face, and no doors beside it. Every provider
                          button on this deployment leads to an account that
                          does not exist yet, and offering them here would be
@@ -608,9 +631,15 @@ export function LoginForm({
                         <Button className="w-full" loading={busy} type="submit">
                           {busy ? "Creating account" : "Create account"}
                         </Button>
+                        {/* Where each door actually comes from, because they do
+                            not come from the same place: Google and GitHub are
+                            credentials in the api's environment and need a
+                            restart, while mail is a setting in this dashboard
+                            and is what makes the magic link arrive. */}
                         <p className="text-xs leading-5 text-muted-foreground">
-                          You can add Google, GitHub or a magic link afterwards,
-                          from Settings.
+                          Google and GitHub are environment variables on the
+                          api, and take a restart. Mail is configured from
+                          Settings, and it is what makes the magic link arrive.
                         </p>
                         {error ? (
                           <p
@@ -623,6 +652,28 @@ export function LoginForm({
                       </form>
                     ) : (
                       <>
+                        {/* An unclaimed deployment whose only remaining door is
+                            the magic link. The link is queued by the api and
+                            delivered by the worker, so on an install that has
+                            not configured mail yet nothing arrives and nothing
+                            says why — and mail is configured from a dashboard
+                            this person cannot reach. Naming the way out is the
+                            only thing this screen can do about it. */}
+                        {claimBlocked &&
+                        !offers("google") &&
+                        !offers("github") ? (
+                          <p className="rounded-xl bg-muted-foreground/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                            The only door this deployment offers is the magic
+                            link, and the link needs a mail transport that is
+                            not configured yet. To claim it with an email and a
+                            password instead, set{" "}
+                            <span className="font-mono">
+                              AUTH_PASSWORD_SIGNIN=enabled
+                            </span>{" "}
+                            on the api and restart it.
+                          </p>
+                        ) : null}
+
                         {offers("google") || offers("github") ? (
                           <div className="flex flex-col gap-2">
                             {offers("google") ? (
