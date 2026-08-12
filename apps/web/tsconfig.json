@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"],
+      /* The extension seam. Two candidates, tried in order: the hosted module
+         if it is on disk, the product's empty one if it is not. The public
+         export cuts `components/cloud/`, which is the whole switch — see
+         `lib/seam/slots.tsx`. The pattern carries a `*` because Turbopack's
+         tsconfig-paths resolver only accepts a candidate list when it does. */
+      "@seam/*": ["./components/cloud/*.tsx", "./lib/seam/*.tsx"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+
+# Verbatim snapshot of the source-of-truth docs. Reformatting it would break
+# provenance comparison against sl/docs.
+docs/snapshot/
+
+# Minified tracker bundle; its shape is the bundler's, and its size is the point.
+apps/tracker/bundle/
+
+# Generated from the OpenAPI spec; formatting is owned by the generator. Both
+# documents: the hosted surface has its own spec and its own client since the
+# open-core split, and `contracts:check` compares each against the generator's
+# own output — so a reformat here would read as drift forever.
+packages/contracts/src/generated/
+packages/contracts/src/cloud/generated/
+
+# The web app keeps the formatting conventions it was imported with (D-218);
+# it is linted by its own eslint-config-next setup, not the backend toolchain.
+apps/web/

@@ -1,0 +1,47 @@
+-- `sites.slug` states its own shape.
+--
+-- ADR-0019 known gap 5, closed 2026-08-06. The gap said the pattern was
+-- "enforced in `packages/domain` and in the contract" and that "adding the CHECK
+-- is a later migration and needs the existing rows verified first". This is that
+-- migration, and the verification is recorded below rather than asserted.
+--
+-- Why it is worth adding at all, given the write path already validates. The
+-- pattern currently lives in three places and the database is the one that
+-- outlives the others: `SITE_SLUG_PATTERN`
+-- (`packages/domain/src/site-identity.ts`) guards the create route, openapi.yaml
+-- guards the contract, and migration 0011 already spells the identical regex as
+-- a CHECK on `share_slug` — the *public* slug — while the primary one it mirrors
+-- had none. That asymmetry is the whole finding: two columns holding the same
+-- kind of value, one of which a direct SQL write, a fixture, an import or a
+-- future route could put a malformed value into. `createSiteWithOwner` is
+-- exactly such an unguarded primitive, and ADR-0019 records that every site in
+-- production was once created by hand.
+--
+-- **The rows were verified on production before this was written**, which is the
+-- condition the gap attached: 12 rows, **0** violating the pattern, longest slug
+-- 44 characters against a 63-character bound, none over. So the constraint is
+-- added valid rather than `NOT VALID` — there is nothing for a deferred
+-- `VALIDATE` to discover, and one row per site is not a table whose full scan
+-- needs staging. A future `sites` large enough to care would take the two-step.
+--
+-- **The deleted-site tombstone was the trap, and it does not spring.** ADR-0030
+-- D4 rewrites a deleted site's slug to `deleted-{site id}`, so the constraint
+-- has to admit that form or site deletion would start failing at its final
+-- write. It conforms, and structurally rather than by luck: `newId()` renders a
+-- UUIDv7 through `Buffer.toString('hex')`, which is lowercase, so the value is
+-- `deleted-` plus 36 characters of `[0-9a-f-]` — 44 in total, opening on `d`,
+-- closing on a hex digit, with 42 interior characters against the pattern's
+-- 61-character allowance. All four tombstones in production match. The
+-- tombstone was designed to fit the slug grammar, so this constraint needs no
+-- exemption for it, and a uniform rule is worth more than a rule with a hole
+-- shaped like the one path that rewrites the column without going through the
+-- create route.
+--
+-- Rollout: additive and non-blocking in practice — one constraint on a
+-- twelve-row table, no column, index or data change, and nothing behaves
+-- differently for any value the write path would already have accepted
+-- (forward-only; applied migrations are never edited — D-214).
+
+ALTER TABLE sites
+  ADD CONSTRAINT sites_slug_format
+    CHECK (slug ~ '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$');

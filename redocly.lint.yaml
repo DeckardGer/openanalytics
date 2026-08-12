@@ -1,0 +1,28 @@
+# Deliberately NOT named `redocly.yaml`.
+#
+# openapi-typescript auto-discovers a root `redocly.yaml` and then demands an
+# `x-openapi-ts.output` key, which would move control of the generated file out
+# of `scripts/generate-contracts.mjs` — the script that adds the do-not-edit
+# banner and implements the `--check` drift comparison. Naming this file
+# explicitly keeps lint configuration and code generation independent.
+#
+# Used via: redocly lint --config redocly.lint.yaml <spec>
+
+rules:
+  # Milestone 0 defines the shared schemas — error envelope, money, date range,
+  # freshness, cursor page — before the routes that will reference them. The
+  # frontend builds its mocks against these while the endpoints are still being
+  # implemented (docs snapshot 03 §4), so "declared but not yet referenced" is
+  # the intended state, not an oversight.
+  #
+  # Revisit once Milestone 7 has landed the read API: at that point an unused
+  # component genuinely does indicate dead contract surface.
+  no-unused-components: off
+
+  # These matter from the start.
+  struct: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-summary: error
+  no-invalid-media-type-examples: error
+  security-defined: error

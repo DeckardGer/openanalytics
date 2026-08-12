@@ -1,0 +1,26 @@
+{
+  "name": "@openanalytics/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenAPI 3.1 spec, shared response envelopes and generated TypeScript client.",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}

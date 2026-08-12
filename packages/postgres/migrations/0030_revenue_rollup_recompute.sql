@@ -1,0 +1,156 @@
+-- The full-site rollup re-roll marker (ADR-0033, D2c/D7).
+-- Milestone 12 Checkpoint 5.
+--
+-- Rollout note: one additive nullable column on a table that has existed since
+-- 0029, no backfill, no default beyond NULL. Nothing reads it until this
+-- checkpoint's worker ships, and a NULL is exactly the behaviour every site had
+-- before it existed. 0023-0029 are applied and are therefore never edited
+-- (D-214).
+--
+-- ============================================================================
+-- The hole this closes
+-- ============================================================================
+--
+-- Every revenue amount is materialized in the site's `reporting_currency` at
+-- projection time (D2c, ClickHouse 0016) and summed into buckets in that same
+-- currency (D7, ClickHouse 0018). Changing the setting therefore invalidates
+-- BOTH layers, and CP5 makes the first half safe by finally bumping
+-- `revenue_objects.version` in `resetRevenueProjection` — the CP3 TODO — so a
+-- re-materialized fact SUPERSEDES the row it replaces instead of tying with it.
+--
+-- The second half does not follow from the first. The rollup step recomputes the
+-- buckets of the attribution job's rolling horizon, which reaches back
+-- `window + lateness` — about a month. Buckets older than that are never
+-- revisited by anything: their facts have been correctly re-projected in the new
+-- currency, and their stored totals sit in the old one, indefinitely, with
+-- nothing anywhere recording that the two disagree. A dashboard would show a
+-- year of USD and a month of EUR under one label, and no test that only checks
+-- recent data could ever see it.
+--
+-- ============================================================================
+-- Why a marker and not one of the two obvious alternatives
+-- ============================================================================
+--
+-- **Not "recompute everything on every pass".** The rolling horizon exists so a
+-- site with no new purchases eventually goes quiet; re-reading a customer's
+-- entire revenue history 96 times a day forever, so that a setting they may
+-- change once can never be stale, is the wrong trade by several orders of
+-- magnitude.
+--
+-- **Not "reuse the horizon's oldest-changed-head escape hatch".** The reset does
+-- touch every head, so `readOldestChangedRevenueChargeOccurrence` would pull the
+-- horizon floor back to the site's first charge on the very next pass — which
+-- looks like a free answer and is a race. The projection loop and the
+-- attribution loop are independent, so the attribution pass can run BEFORE the
+-- re-projection has produced a single new fact. It would then recompute the
+-- whole history from the OLD facts, write nothing (they are unchanged), and
+-- advance `computed_through` past the moment of the reset. The heads' updated_at
+-- is now behind that watermark, the escape hatch finds nothing, and the buckets
+-- are wrong forever — with no marker to say so. A recompute driven by "something
+-- changed" cannot be correct when the thing that changed is a rewrite that has
+-- not happened yet.
+--
+-- ============================================================================
+-- The rule
+-- ============================================================================
+--
+-- `rollup_recompute_from` is a **cursor**, not a flag. It is set by the
+-- reporting-currency PATCH, in the SAME transaction as
+-- `resetRevenueProjection`, to the floor the rollup must reach (the epoch —
+-- "all of it"), and it is also set by the rollup step itself when a late
+-- object's occurrence lands further back than one pass should read. While it is
+-- non-null:
+--
+--   * discovery returns the site regardless of watermarks, so the pass happens;
+--   * the rollup step processes ONE CHUNK — at most
+--     `REVENUE_ROLLUP_RECOMPUTE_CHUNK_DAYS` (31) whole UTC days of buckets,
+--     oldest first — and moves the cursor forward to the end of that chunk;
+--   * the cursor is cleared only when a chunk reaches the floor of the rolling
+--     horizon, from which point the ordinary pass covers everything;
+--   * the ATTRIBUTION horizon is never widened by any of this. A reporting
+--     currency changes no journey, and a late dispute changes no journey either,
+--     so widening that read would mean re-reading a site's whole session history
+--     for nothing.
+--
+-- ## Why a chunked cursor rather than "recompute everything until clear"
+--
+-- The first CP5 draft cleared the marker in one pass, which meant one tick read
+-- a site's ENTIRE revenue history into memory (`readCurrentRows` has no LIMIT)
+-- and did so on every tick until the clear succeeded. A three-year account would
+-- have made a 60-second loop allocate its whole fact table repeatedly, inside a
+-- process that is also ingesting events. A chunk bounds that to one month of
+-- facts per pass, and the walk finishes a three-year history in about 36 passes.
+--
+-- The chunk is read SEPARATELY from the pass's ordinary fact read rather than by
+-- widening it. The two ranges are disjoint by construction — the chunk is
+-- strictly below the horizon's floor — and unioning them would mean reading
+-- every year in between, which is exactly the unbounded read the chunk exists to
+-- avoid.
+--
+-- ## The advance precondition, and the race it closes
+--
+-- A chunk's cursor advance requires the site to be fully projected — zero heads
+-- with `projected_version < version` — **both** when the pass began and at the
+-- moment of the advance:
+--
+--   * the check at advance time lives in this statement's own `WHERE`, as a
+--     `NOT EXISTS`, so "the rollup ran" and "the cursor moved" cannot come apart
+--     under a crash;
+--   * the check BEFORE the fact read is what makes the first check meaningful.
+--     Without it the sequence is: read facts (projection still behind, amounts
+--     are in the OLD currency) → projection completes → advance sees a clean
+--     `NOT EXISTS` and moves the cursor past a chunk that was built from stale
+--     amounts. Nothing would ever return: the heads' `updated_at` is behind the
+--     watermark by then, `computed_through` has advanced, and the cursor has
+--     moved on. The bucket keeps the previous currency's numbers permanently.
+--
+-- Requiring both means the pass observed a quiet projection on either side of
+-- its own read. A head that becomes due AND completes entirely inside that
+-- window is a webhook arriving mid-pass — new data rather than a stale
+-- restatement — and the rolling horizon covers it on the next pass, or, if it is
+-- an old occurrence from a backfill, the changed-object floor below does.
+--
+-- ## `rollup_generation_seq`: why not `max(stored) + 1`
+--
+-- Migration 0014's session rollups mint a swap generation as one above the
+-- highest stored, which is collision-free while exactly one writer is awake.
+-- This job's lease is a five-minute TTL and **nothing renews it**, so a pass
+-- long enough to outlive its own lease (a chunked recompute over a large
+-- account) runs beside the worker that took the lease from it. Both read the
+-- same stored maximum, both compute the same next generation, and
+-- ReplacingMergeTree cannot resolve a tie — per-column `argMax` can return a row
+-- assembled from both.
+--
+-- A per-site counter bumped inside the lease claim removes the possibility
+-- rather than narrowing the window: the claim is a conditional UPDATE that only
+-- one worker wins, so every run holds a distinct number and the newer run's
+-- number is always the higher one. The newer answer therefore supersedes the
+-- older, which is also the outcome anyone would want from a lease that was
+-- stolen because the previous holder was too slow.
+--
+-- It starts at 0 and the claim bumps before use, so the first generation written
+-- for a site is 1. It only ever increases, and every generation stored in
+-- ClickHouse for a site came from it, so it can never be lower than something
+-- already there.
+--
+-- `rollup_recompute_from` is a timestamptz rather than a boolean because it has
+-- to carry the cursor position, and that also lets a future bounded re-roll (a
+-- corrected exponent table for one month, say) reuse the machinery unchanged.
+
+ALTER TABLE revenue_attribution_state
+  ADD COLUMN rollup_recompute_from timestamptz;
+
+ALTER TABLE revenue_attribution_state
+  ADD COLUMN rollup_generation_seq bigint NOT NULL DEFAULT 0;
+
+ALTER TABLE revenue_attribution_state
+  ADD CONSTRAINT revenue_attribution_state_rollup_generation_check
+  CHECK (rollup_generation_seq >= 0);
+
+-- Discovery ORs on this column, and the predicate is `IS NOT NULL` over a column
+-- that is null for every site almost all of the time. A partial index is the
+-- exact shape for that: it holds only the handful of rows that are pending, so
+-- the scan is a lookup rather than a walk of every site with revenue.
+CREATE INDEX IF NOT EXISTS revenue_attribution_state_recompute_idx
+  ON revenue_attribution_state (site_id)
+  WHERE rollup_recompute_from IS NOT NULL;

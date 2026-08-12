@@ -1,0 +1,22 @@
+{
+  "name": "@openanalytics/tracker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-free browser tracker source and build output.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  }
+}

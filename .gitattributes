@@ -1,0 +1,22 @@
+# LF in the repository and in the working tree, on every platform.
+#
+# Two things depend on this. The docs snapshot records SHA-256 hashes that must
+# stay verifiable on a Windows checkout, and the generated-client drift check
+# compares file contents — a platform-dependent line ending would make both
+# report differences that are not real.
+* text=auto eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# Generated; keep it out of diffs and language statistics.
+pnpm-lock.yaml linguist-generated=true -diff
+packages/contracts/src/generated/** linguist-generated=true
+
+# Frozen source-of-truth copy, not authored here.
+docs/snapshot/** linguist-vendored=true

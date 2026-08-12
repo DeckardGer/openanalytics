@@ -1,0 +1,32 @@
+{
+  "name": "@openanalytics/postgres",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Postgres migration runner with checksum ledger, and repository boundaries.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  },
+  "dependencies": {
+    "pg": "8.22.0",
+    "drizzle-orm": "0.45.2",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/observability": "workspace:*",
+    "@openanalytics/migrations": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0"
+  }
+}

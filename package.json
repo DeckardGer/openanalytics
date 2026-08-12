@@ -1,0 +1,80 @@
+{
+  "name": "openanalytics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Open Analytics — durable analytics ingest, control plane and read contracts.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenLabs-so/openanalytics.git"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": "24.x"
+  },
+  "pnpm": {
+    "//": "esbuild bundles the tracker for its CI size budget; its install script links the platform binary.",
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean",
+    "typecheck": "tsc --build tsconfig.json --force && tsc -p tests/tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "boundaries": "node scripts/check-boundaries.mjs",
+    "create-admin": "node scripts/create-admin.mjs",
+    "env:example": "node scripts/generate-env-example.mjs",
+    "env:example:check": "node scripts/generate-env-example.mjs --check",
+    "schema:product": "node scripts/assert-product-schema.mjs",
+    "tracker:build": "node scripts/build-tracker.mjs",
+    "contracts:lint": "redocly lint --config redocly.lint.yaml packages/contracts/openapi/openapi.yaml",
+    "contracts:generate": "node scripts/generate-contracts.mjs",
+    "contracts:check": "node scripts/generate-contracts.mjs --check",
+    "contracts:smoke": "tsc -p tests/smoke/frontend-client/tsconfig.json",
+    "test": "vitest run --project unit --project contract --project tracker",
+    "test:unit": "vitest run --project unit",
+    "test:contract": "vitest run --project contract",
+    "test:tracker": "vitest run --project tracker",
+    "test:integration": "vitest run --project integration",
+    "test:migration": "vitest run --project migration",
+    "migrate:postgres": "node packages/postgres/dist/cli.js",
+    "migrate:clickhouse": "node packages/clickhouse/dist/cli.js",
+    "verify": "pnpm run boundaries && pnpm run format:check && pnpm run lint && pnpm run contracts:lint && pnpm run contracts:check && pnpm run build && pnpm run env:example:check && tsc -p tests/tsconfig.json && pnpm run tracker:build && pnpm run test"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1092.0",
+    "@clickhouse/client": "1.23.1",
+    "@eslint/js": "9.39.5",
+    "@openanalytics/auth": "workspace:*",
+    "@openanalytics/cli": "workspace:*",
+    "@openanalytics/clickhouse": "workspace:*",
+    "@openanalytics/contracts": "workspace:*",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/integrations": "workspace:*",
+    "@openanalytics/migrations": "workspace:*",
+    "@openanalytics/observability": "workspace:*",
+    "@openanalytics/postgres": "workspace:*",
+    "@openanalytics/redis": "workspace:*",
+    "@openanalytics/testkit": "workspace:*",
+    "@redocly/cli": "2.39.0",
+    "@types/node": "24.10.1",
+    "@types/nodemailer": "8.0.1",
+    "@types/pg": "8.20.0",
+    "esbuild": "0.27.5",
+    "eslint": "9.39.5",
+    "globals": "17.7.0",
+    "happy-dom": "20.0.1",
+    "openapi-typescript": "7.13.0",
+    "pg": "8.22.0",
+    "prettier": "3.9.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,0 +1,539 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --animate-skeleton: skeleton 2s -1s infinite linear;
+  --animate-shimmer-sweep: shimmer-sweep 3.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  --animate-caret-blink: 1s ease-out infinite caret-blink;
+  --animate-toast-success-odd: toast-success-odd 0.32s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-success-even: toast-success-even 0.32s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-error-odd: toast-error-odd 0.28s cubic-bezier(0.5, 1, 0.89, 1);
+  --animate-toast-error-even: toast-error-even 0.28s cubic-bezier(0.5, 1, 0.89, 1);
+  --font-heading: var(--font-heading);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar: var(--sidebar);
+  --color-code-highlight: var(--code-highlight);
+  --code-foreground: var(--code-foreground);
+  --color-code: var(--code);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-ring: var(--ring);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-input: var(--input);
+  --color-destructive: var(--destructive);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-blueprint: var(--blueprint);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --color-destructive-foreground: var(--destructive-foreground);
+  /* Halfway between 6xl (72rem) and 7xl (80rem) — the landing frame width. */
+  --container-6\.5xl: 76rem;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-chart-scale-pattern-color: var(--chart-scale-pattern-color);
+  --color-chart-scale-05: var(--chart-scale-05);
+  --color-chart-scale-04: var(--chart-scale-04);
+  --color-chart-scale-03: var(--chart-scale-03);
+  --color-chart-scale-02: var(--chart-scale-02);
+  --color-chart-scale-01: var(--chart-scale-01);
+  --color-chart-label: var(--chart-label);
+  --color-chart-marker-foreground: var(--chart-marker-foreground);
+  --color-chart-marker-border: var(--chart-marker-border);
+  --color-chart-marker-background: var(--chart-marker-background);
+  --color-chart-tooltip-muted: var(--chart-tooltip-muted);
+  --color-chart-tooltip-foreground: var(--chart-tooltip-foreground);
+  --color-chart-tooltip-background: var(--chart-tooltip-background);
+  --chart-brush-border: var(--chart-brush-border);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-crosshair: var(--chart-crosshair);
+  --chart-line-secondary: var(--chart-line-secondary);
+  --chart-line-primary: var(--chart-line-primary);
+  --color-chart-foreground-muted: var(--chart-foreground-muted);
+  --color-chart-foreground: var(--chart-foreground);
+  --color-chart-background: var(--chart-background);
+  @keyframes skeleton {
+  to {
+    background-position: -200% 0;
+    }
+  }
+  /* Self-running button shimmer: sweep across, then rest until the loop.
+     The sweep spans 0–75% of the cycle — the crossing itself is slow — and
+     the remaining 25% is the rest between passes. */
+  @keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+    }
+  75%, to {
+    transform: translateX(100%);
+    }
+  }
+  @keyframes caret-blink {
+  0%, 70%, to {
+    opacity: 1;
+    }
+  20%, 50% {
+    opacity: 0;
+    }
+  }
+  @keyframes toast-success-odd {
+  0% {
+    scale: 1;
+    }
+  30% {
+    scale: 1.025;
+    }
+  60% {
+    scale: 0.99;
+    }
+  100% {
+    scale: 1;
+    }
+  }
+  @keyframes toast-error-odd {
+  0% {
+    translate: 0 0;
+    }
+  25% {
+    translate: -3px 0;
+    }
+  50% {
+    translate: 3px 0;
+    }
+  75% {
+    translate: -3px 0;
+    }
+  100% {
+    translate: 0 0;
+    }
+  }
+  @keyframes toast-success-even {
+  0% {
+    scale: 1;
+    }
+  30% {
+    scale: 1.025;
+    }
+  60% {
+    scale: 0.99;
+    }
+  100% {
+    scale: 1;
+    }
+  }
+  @keyframes toast-error-even {
+  0% {
+    translate: 0 0;
+    }
+  25% {
+    translate: -3px 0;
+    }
+  50% {
+    translate: 3px 0;
+    }
+  75% {
+    translate: -3px 0;
+    }
+  100% {
+    translate: 0 0;
+    }
+  }
+}
+
+:root {
+  --destructive-foreground: var(--color-red-700);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-600);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  --ink: #292929;
+  --accent: color-mix(in srgb, var(--ink) 5%, transparent);
+  --accent-foreground: var(--ink);
+  --background: #f6f6f6;
+  --border: color-mix(in srgb, var(--ink) 12%, transparent);
+  --card: #ffffff;
+  --card-foreground: var(--ink);
+  --destructive: var(--color-red-500);
+  --foreground: var(--ink);
+  --input: color-mix(in srgb, var(--ink) 14%, transparent);
+  --muted: color-mix(in srgb, var(--ink) 5%, transparent);
+  --muted-foreground: #6d6d6d;
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: #305dde;
+  --primary-foreground: #ffffff;
+  --ring: #3ba6f1;
+  --secondary: #e9e9e9;
+  --secondary-foreground: var(--ink);
+  --blueprint: color-mix(in srgb, #7a72e8 44%, transparent);
+  --chart-1: #296FF0;
+  --chart-2: var(--color-teal-600);
+  --chart-3: var(--color-cyan-900);
+  --chart-4: var(--color-amber-400);
+  --chart-5: var(--color-amber-500);
+  --code: #ffffff;
+  --code-foreground: var(--foreground);
+  --code-highlight: color-mix(in srgb, var(--ink) 4%, transparent);
+  --radius: 0.625rem;
+  --font-heading: var(--font-sans);
+  --sidebar: #f0f0f0;
+  --sidebar-accent: color-mix(in srgb, var(--ink) 4%, transparent);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: color-mix(in srgb, var(--ink) 10%, transparent);
+  --sidebar-foreground: color-mix(in srgb, var(--ink) 64%, var(--sidebar));
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: #f7f2eb;
+  --sidebar-ring: #3ba6f1;
+  --chart-background: oklch(1 0 0);
+  --chart-foreground: oklch(0.145 0.004 285);
+  --chart-foreground-muted: oklch(0.55 0.014 260);
+  --chart-line-primary: var(--chart-1);
+  --chart-line-secondary: var(--chart-2);
+  --chart-crosshair: oklch(0.4 0.1828 274.34);
+  --chart-grid: oklch(0.9 0 0);
+  --chart-brush-border: var(--chart-grid);
+  --chart-tooltip-background: oklch(0.21 0.006 285 / 0.8);
+  --chart-tooltip-foreground: oklch(0.985 0 0);
+  --chart-tooltip-muted: oklch(0.65 0.01 260);
+  --chart-marker-background: oklch(0.97 0.005 260);
+  --chart-marker-border: oklch(0.85 0.01 260);
+  --chart-marker-foreground: oklch(0.3 0.01 260);
+  --chart-label: oklch(0.45 0.01 260);
+  --chart-scale-01: oklch(0.98 0.003 106);
+  --chart-scale-02: oklch(0.92 0.008 106);
+  --chart-scale-03: oklch(0.82 0.015 106);
+  --chart-scale-04: oklch(0.68 0.02 106);
+  --chart-scale-05: oklch(0.55 0.025 106);
+  --chart-scale-pattern-color: oklch(0.96 0.005 106);
+}
+
+.dark {
+  --destructive-foreground: var(--color-red-400);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-400);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-400);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-400);
+  --ink: #ededed;
+  --accent: color-mix(in srgb, var(--ink) 6%, transparent);
+  --accent-foreground: var(--ink);
+  --background: #191919;
+  --border: color-mix(in srgb, var(--ink) 14%, transparent);
+  --card: #212121;
+  --card-foreground: var(--ink);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --foreground: var(--ink);
+  --input: color-mix(in srgb, var(--ink) 16%, transparent);
+  --muted: color-mix(in srgb, var(--ink) 5%, transparent);
+  --muted-foreground: #969696;
+  --popover: #242424;
+  --popover-foreground: var(--ink);
+  --primary: #296FF0;
+  --primary-foreground: #ffffff;
+  --ring: #3ba6f1;
+  --secondary: #2e2e2e;
+  --secondary-foreground: var(--ink);
+  --blueprint: color-mix(in srgb, #928df6 40%, transparent);
+  --chart-1: #296FF0;
+  --chart-2: var(--color-emerald-500);
+  --chart-3: var(--color-amber-500);
+  --chart-4: var(--color-purple-500);
+  --chart-5: var(--color-rose-500);
+  --code: #212121;
+  --code-foreground: var(--foreground);
+  --code-highlight: color-mix(in srgb, var(--ink) 5%, transparent);
+  --sidebar: #1e1e1e;
+  --sidebar-accent: color-mix(in srgb, var(--ink) 5%, transparent);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: color-mix(in srgb, var(--ink) 10%, transparent);
+  --sidebar-foreground: color-mix(in srgb, var(--ink) 64%, var(--sidebar));
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: #191919;
+  --sidebar-ring: #3ba6f1;
+  --chart-background: oklch(0.145 0 0);
+  --chart-foreground: oklch(0.45 0 0);
+  --chart-foreground-muted: oklch(0.65 0.01 260);
+  --chart-crosshair: oklch(0.45 0 0);
+  --chart-grid: oklch(0.25 0 0);
+  --chart-brush-border: var(--chart-grid);
+  --chart-marker-background: oklch(0.25 0.01 260);
+  --chart-marker-border: oklch(0.4 0.01 260);
+  --chart-marker-foreground: oklch(0.9 0 0);
+  --chart-label: oklch(0.75 0.01 260);
+  --chart-scale-01: oklch(0.28 0.03 270);
+  --chart-scale-02: oklch(0.38 0.04 270);
+  --chart-scale-03: oklch(0.48 0.05 270);
+  --chart-scale-04: oklch(0.58 0.06 270);
+  --chart-scale-05: oklch(0.68 0.07 270);
+  --chart-scale-pattern-color: oklch(0.145 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    /* White, not --background: the dashboard's page colour is white, and the
+       body is what shows through top/bottom overscroll — a grey body reads
+       as a different page peeking out. Screens that want the grey stage
+       (login, onboarding) paint their own full-height backdrop. */
+    @apply bg-white text-foreground;
+    /* Full-bleed hairlines use 100vw; clip so they never cause a horizontal
+       scrollbar next to the vertical scrollbar. */
+    overflow-x: clip;
+  }
+  code, kbd, samp, pre {
+    font-family: var(--font-mono);
+  }
+  html {
+    @apply font-sans;
+    scroll-behavior: smooth;
+    /* The page-level guard against horizontal overflow, on the root so it
+       propagates to the viewport without making <body> a scroll container
+       (which would break sticky). `hidden` first: older WebKit doesn't know
+       `clip` and would otherwise drop the declaration and clip nothing —
+       exactly the phones where a single wide element makes the browser zoom
+       the whole page out. */
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
+  /* Brand rule: no semibold/bold anywhere — medium is the heaviest weight. */
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 400;
+  }
+  strong, b {
+    font-weight: 500;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}
+
+@layer utilities {
+  /* Tiling fractal-noise grain for glass surfaces */
+  .glass-noise {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='0.9'/></svg>");
+    background-size: 160px 160px;
+  }
+  /* Animated underline for nav/footer links */
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px;
+    background-repeat: no-repeat;
+    background-position: left calc(100% - 1px);
+    transition: background-size 0.3s var(--ease-out, ease);
+  }
+  .link-underline:hover,
+  .link-underline:focus-visible {
+    background-size: 100% 1px;
+  }
+  /* Scroll-in reveal (JS toggles .is-inview) */
+  .reveal {
+    opacity: 0;
+    translate: 0 14px;
+    transition:
+      opacity 0.7s ease-out,
+      translate 0.7s ease-out;
+    transition-delay: var(--reveal-delay, 0s);
+  }
+  .reveal.is-inview {
+    opacity: 1;
+    translate: 0 0;
+  }
+  /* Skeleton reveal (after Transitions.dev's loader): the content comes into
+     focus as it arrives — opacity and blur, one duration, one ease.
+
+     Two details are load-bearing, both paid for in blinks:
+
+     - It is an **animation**, not a transition. The content mounts already in
+       its final state, and a transition has no previous value to run from, so
+       it would simply appear.
+     - `filter: blur(0)` stays on the element **permanently**, outside the
+       keyframes. A filter dropped when an animation ends tears down the
+       element's composited layer and repaints the whole subtree in one frame,
+       and that repaint lands *after* the content has sharpened — which is
+       exactly what reads as a blink rather than as part of the motion. Keeping
+       a zero blur declared keeps the layer alive and costs nothing.
+
+     The skeleton is untouched: it renders, it pulses, it is replaced. */
+  .skel-in {
+    filter: blur(0);
+    animation: skel-in var(--reveal-dur, 400ms) var(--reveal-ease, ease-in-out);
+  }
+  @keyframes skel-in {
+    from {
+      opacity: 0;
+      filter: blur(var(--reveal-blur, 3px));
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skel-in {
+      animation: none;
+    }
+  }
+  /* SVG path draw-in (set pathLength={1} on the path) */
+  .bp-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: bp-draw 1.8s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+  }
+  .bp-fade {
+    opacity: 0;
+    animation: bp-fade 0.6s ease-out 1.4s forwards;
+  }
+  .bp-pulse {
+    animation: bp-pulse 2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      translate: 0 0;
+      transition: none;
+    }
+    .bp-draw {
+      stroke-dasharray: none;
+      stroke-dashoffset: 0;
+      animation: none;
+    }
+    .bp-fade {
+      opacity: 1;
+      animation: none;
+    }
+    .bp-pulse {
+      animation: none;
+    }
+  }
+
+  /* Brand loader (components/ui/brand-loader.tsx): a crest travelling up the
+     mark's bands. Each band runs the same short brightening, offset by its
+     index, so what the eye follows is the offset rather than the animation.
+
+     The cycle is tuned against that stagger — eleven bands at 80ms spans
+     880ms, and a 300ms bright window on a 1.2s loop lands the last band's
+     crest as the first one restarts. Slower and the mark visibly stalls
+     between passes; faster and the crest stops reading as one moving thing.
+
+     The resting opacity is declared on the class as well as in the keyframes:
+     during its `animation-delay` a band is not yet animating, and without it
+     the mark would flash fully lit for one frame before the wave began. */
+  .brand-band {
+    opacity: 0.22;
+    animation: brand-band 1.2s ease-in-out infinite;
+  }
+  @keyframes brand-band {
+    0%,
+    25%,
+    100% {
+      opacity: 0.22;
+    }
+    12% {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* Still the mark, just still. The gate it sits on is a hand-off, so the
+       thing that must survive is the brand, not the motion. */
+    .brand-band {
+      animation: none;
+      opacity: 1;
+    }
+  }
+}
+
+/* Tab-bar lab: ink ripple + icon wiggle */
+@keyframes tb-ink {
+  from {
+    opacity: 0.7;
+    scale: 0.2;
+  }
+  to {
+    opacity: 0;
+    scale: 1.6;
+  }
+}
+@keyframes tb-wiggle {
+  0%, 100% {
+    rotate: 0deg;
+  }
+  25% {
+    rotate: -10deg;
+  }
+  65% {
+    rotate: 7deg;
+  }
+}
+@keyframes atlas-button-text-swap {
+  from {
+    filter: blur(2px);
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes bp-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes bp-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes bp-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}

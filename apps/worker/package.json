@@ -1,0 +1,34 @@
+{
+  "name": "@openanalytics/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Long-running batch ingest, job, sync and deletion worker.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.10",
+    "@openanalytics/clickhouse": "workspace:*",
+    "@openanalytics/contracts": "workspace:*",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/integrations": "workspace:*",
+    "@openanalytics/observability": "workspace:*",
+    "@openanalytics/postgres": "workspace:*",
+    "@openanalytics/redis": "workspace:*",
+    "hono": "4.12.31"
+  }
+}

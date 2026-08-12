@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "allowImportingTsExtensions": true,
+    // `tests/tracker/*` runs in a DOM environment (happy-dom), so the browser
+    // globals the tracker uses have to typecheck here as well.
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  // The frontend smoke consumer resolves @openanalytics/contracts against the
+  // built `dist` on its own tsconfig (proving a published-artifact consumer
+  // compiles); it must not be pulled into the source-resolved test compile.
+  "include": ["**/*.ts"],
+  "exclude": ["smoke/**"]
+}

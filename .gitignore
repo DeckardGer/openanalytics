@@ -1,0 +1,30 @@
+node_modules/
+dist/
+coverage/
+
+# Tracker bundle: build output, measured in CI by scripts/build-tracker.mjs
+apps/tracker/bundle/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+# Self-host: everything infra/selfhost/generate-secrets.sh writes. The templates
+# beside them are committed; the filled-in copies carry every secret the
+# deployment has.
+infra/selfhost/env/*.env
+!infra/selfhost/env/*.env.example
+infra/selfhost/docker-compose.override.yml
+# A licensed GeoIP database, which may not be redistributed.
+infra/selfhost/geoip/*
+!infra/selfhost/geoip/.gitkeep
+
+.DS_Store
+Thumbs.db
+
+.vitest/
+.eslintcache
+
+# Vercel CLI link state (per-machine)
+.vercel/

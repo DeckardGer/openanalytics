@@ -1,0 +1,33 @@
+{
+  "name": "@openanalytics/collector",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public high-frequency event intake endpoint.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.10",
+    "@openanalytics/contracts": "workspace:*",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/observability": "workspace:*",
+    "@openanalytics/postgres": "workspace:*",
+    "@openanalytics/redis": "workspace:*",
+    "hono": "4.12.31",
+    "mmdb-lib": "3.0.2"
+  }
+}

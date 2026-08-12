@@ -1,0 +1,29 @@
+{
+  "name": "@openanalytics/clickhouse",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ClickHouse migration runner with checksum ledger, and read/ingest repositories.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  },
+  "dependencies": {
+    "@clickhouse/client": "1.23.1",
+    "@openanalytics/contracts": "workspace:*",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/migrations": "workspace:*",
+    "@openanalytics/observability": "workspace:*"
+  }
+}

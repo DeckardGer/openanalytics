@@ -1,0 +1,102 @@
+# OpenAnalytics
+
+Open-source, privacy-first web analytics. One lightweight tracker script, no
+cookies, no cross-site profiles, aggregate-only reads — self-hostable on your
+own hardware under AGPL-3.0.
+
+A hosted instance runs at **[getopen.so](https://getopen.so)**, operated by the
+authors: the same code, someone else's servers.
+
+## What is in this repository
+
+The product, as one pnpm monorepo:
+
+| App                  | Role                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/tracker`       | The browser snippet — a few KiB, with a byte budget CI enforces                                                                              |
+| `apps/collector`     | Ingest: validates, sanitizes, rate-limits, enqueues                                                                                          |
+| `apps/worker`        | Drains the queue into ClickHouse; sessions, rollups, exports, mail, deletions                                                                |
+| `apps/api`           | Control plane: auth, sites, keys, sharing, event definitions, funnels, widgets, revenue, AI assistant, MCP                                   |
+| `apps/query-gateway` | The only process allowed to read ClickHouse; verifies signed query envelopes                                                                 |
+| `apps/realtime`      | The SSE stream behind the live dashboard                                                                                                     |
+| `apps/web`           | The dashboard (Next.js)                                                                                                                      |
+| `apps/cli`           | `oa` — site setup, stats, device-flow login                                                                                                  |
+| `packages/*`         | domain, postgres (+migrations), clickhouse (+migrations), redis, auth, contracts (OpenAPI), observability, integrations, migrations, testkit |
+
+Stores: **Postgres** (control plane), **ClickHouse** (events and rollups),
+**Valkey ×2** (one durable event queue, one losable realtime cache).
+
+What it does, in one list: page views, custom and attribute-driven events,
+sessions, web vitals, funnels, per-site retention, embeddable widgets, public
+share links, revenue analytics from _your_ Stripe account, CSV/JSON import and
+export, an MCP server, and a CLI.
+
+Architecture rules CI enforces, not conventions:
+
+- `apps/web` may import only `packages/contracts` — the OpenAPI document is the
+  single seam between frontend and backend.
+- ClickHouse is reachable only through the query gateway, which verifies
+  Ed25519-signed query envelopes minted by the api.
+- The tracker has a hard byte budget; a change that exceeds it fails CI.
+- The Postgres schema this repository builds contains no billing tables, and a
+  CI job asserts that against a real database rather than a file list.
+
+## Self-hosting
+
+**[SELF-HOSTING.md](SELF-HOSTING.md)** is the guide: a generator script, one
+`docker compose up -d`, automatic TLS, and an explanation of every secret and
+every failure mode. Requirements are a Linux host with Docker, four DNS records
+and about 4 GB of RAM.
+
+```sh
+git clone https://github.com/OpenLabs-so/openanalytics
+cd openanalytics/infra/selfhost
+./generate-secrets.sh --domain example.com --email you@example.com
+docker compose up -d
+docker compose --profile tools run --rm create-admin --email you@example.com
+```
+
+To run it from source instead — for development, or to slot the services into
+infrastructure you already have — follow
+[Running from source](SELF-HOSTING.md#running-from-source). **The order matters
+and one obvious order does not work:** the migration runners are compiled
+output, so `pnpm run build` comes before `pnpm run migrate:postgres`.
+
+`infra/selfhost/env/*.env.example` documents every variable each service reads,
+and there is one file per service on purpose — the environment schema forbids
+some keys to some services, so a single shared `.env` cannot be correct. The
+AI assistant (`OPENAI_API_KEY`) and object storage are optional: unset, those
+surfaces disable themselves and everything else runs.
+
+Run the test suite the way CI does:
+
+```sh
+pnpm run test          # unit + contract + tracker, no infrastructure needed
+pnpm run verify        # everything CI checks, including boundaries and the size budget
+```
+
+## Privacy model
+
+No cookies, no fingerprinting, no cross-site identifiers. Visitor identity is a
+daily-rotating salted hash; raw IP addresses are never stored. Do Not Track and
+Global Privacy Control are honored at the collector, before anything is written.
+City-level geolocation is opt-in per site, and the GeoIP database is yours to
+supply — none is bundled.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), including the one unusual rule:
+development happens in an internal repository, and this one receives verified
+exports. Your pull request is reviewed here, applied internally with credit, and
+lands with the next export.
+
+Security reports: [SECURITY.md](SECURITY.md).
+
+## License and trademark
+
+Code: [AGPL-3.0](LICENSE). If you run a modified OpenAnalytics as a network
+service, the AGPL requires you to offer your modified source to its users.
+
+The "OpenAnalytics" name and the hosted service's domain identify the instance
+its authors operate and are **not** part of the license grant. A self-hosted
+instance runs the software, not the brand.

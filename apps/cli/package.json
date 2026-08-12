@@ -1,0 +1,30 @@
+{
+  "name": "@openanalytics/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Command-line client for the read surface, authenticated by OAuth Device Authorization.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "oa": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.7.0",
+    "@openanalytics/domain": "workspace:*"
+  }
+}

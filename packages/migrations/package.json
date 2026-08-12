@@ -1,0 +1,22 @@
+{
+  "name": "@openanalytics/migrations",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Store-agnostic migration discovery, ordering and checksum-drift detection.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  }
+}

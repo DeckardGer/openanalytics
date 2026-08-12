@@ -1,0 +1,46 @@
+-- The install-verified signal: when a site's first event reached the pipeline
+-- (ADR-0027).
+--
+-- Rollout note: additive -- one nullable column on an existing table, no
+-- backfill, no default, no index, no constraint. It applies to a live database
+-- instantly and nothing behaves differently until the worker fills its first row
+-- (forward-only; migrations 0001-0018 are never edited -- D-214).
+--
+-- Why it exists: onboarding has a "tracker installed" step and no way to answer
+-- it. The only fact available was "does an analytics query return rows", which
+-- costs a ClickHouse read per poll and answers the wrong question -- an
+-- interval with no rows means "not installed" and "installed, nobody visited
+-- yet" and "installed, but you are looking at the wrong 24 hours", and the
+-- frontend cannot tell those apart. A single instant on the site row collapses
+-- all three: NULL means no event has ever reached the pipeline for this site,
+-- and any value means one has.
+--
+-- Who writes it: the batch worker, from its existing manifest flow, once per
+-- site ever. Explicitly NOT the collector -- an install check that cost a
+-- Postgres write on the per-event hot path would tax every event a site will
+-- ever send to answer a question that stops being interesting after the first
+-- one (ADR-0027 rejects that alternative in full).
+--
+-- No backfill. Every site that already has traffic keeps NULL until its next
+-- event lands, and then reports that event's instant rather than its true first.
+-- The alternative is a scan of `events_raw` per existing site to recover a
+-- number whose only consumer is a boolean ("is data flowing"), and the sites
+-- this signal is for -- the ones being onboarded right now -- have no history to
+-- recover.
+--
+-- NULL semantics: "no event has ever been ingested for this site". It is not
+-- "unknown": the column is written by the only process that could know.
+
+ALTER TABLE sites
+  ADD COLUMN first_event_at timestamptz;
+
+-- No index. The column is read as one field of a site row the dashboard already
+-- fetches by primary key, and it is written under `WHERE id = ... AND
+-- first_event_at IS NULL`, which is also a primary-key lookup. Nothing filters
+-- or sorts sites by it.
+--
+-- No CHECK either. "Not in the future" is the only invariant worth stating and
+-- it is not expressible: the value is an event's `occurred_at`, which is client
+-- time the collector has already bounded (ADR-0008 clock-skew clamping), and a
+-- CHECK against `now()` is not immutable and could not be added to a column
+-- anyway. Bounding it is the ingest path's job, upstream of here.

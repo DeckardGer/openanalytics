@@ -1,0 +1,56 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./apps/api"
+    },
+    {
+      "path": "./apps/cli"
+    },
+    {
+      "path": "./apps/collector"
+    },
+    {
+      "path": "./apps/query-gateway"
+    },
+    {
+      "path": "./apps/realtime"
+    },
+    {
+      "path": "./apps/tracker"
+    },
+    {
+      "path": "./apps/worker"
+    },
+    {
+      "path": "./packages/auth"
+    },
+    {
+      "path": "./packages/clickhouse"
+    },
+    {
+      "path": "./packages/contracts"
+    },
+    {
+      "path": "./packages/domain"
+    },
+    {
+      "path": "./packages/integrations"
+    },
+    {
+      "path": "./packages/migrations"
+    },
+    {
+      "path": "./packages/observability"
+    },
+    {
+      "path": "./packages/postgres"
+    },
+    {
+      "path": "./packages/redis"
+    },
+    {
+      "path": "./packages/testkit"
+    }
+  ]
+}

@@ -1,0 +1,505 @@
+# OpenAnalytics — the whole product, self-hosted, from one `docker compose up`.
+#
+# Read /SELF-HOSTING.md at the repository root before running this. The short
+# version: `./generate-secrets.sh` once, then `docker compose up -d`.
+#
+# ---------------------------------------------------------------------------
+# Three things in this file are load-bearing rather than stylistic. Change them
+# only on purpose.
+#
+# 1. EVERY SERVICE HAS ITS OWN `env_file`, and there is no shared one.
+#    `packages/domain/src/env.ts` gives each service a FORBIDDEN_KEYS list and a
+#    service handed a secret it must not hold EXITS AT STARTUP. That is the
+#    design working, not a bug: the collector is internet-facing and must not be
+#    able to reach ClickHouse; the gateway verifies signatures and must not hold
+#    the key that mints them; only the worker may delete analytics rows. One
+#    shared `.env` would hand every service every secret and nothing would boot.
+#
+#    The same rule says an EMPTY value is not an absent one. `FOO=` in an env
+#    file sets `FOO` to the empty string, and the schema rejects it (measured:
+#    `z.string().min(1).optional()` fails on `''`, and `PORT=` coerces to 0).
+#    Leave an unused variable COMMENTED OUT — never blank.
+#
+# 2. THE TWO VALKEY INSTANCES ARE ADDRESSED BY IP, NOT BY SERVICE NAME.
+#    `buildConnectionOptions` (packages/redis/src/client.ts) refuses a plaintext
+#    `redis://` URL whose host is not provably private, because that hop may
+#    carry the only copy of a customer event. It recognises loopback, 10/8,
+#    192.168/16 and 172.16-31/12 — and a compose service name is none of those,
+#    so `redis://valkey-queue:6379` is rejected with "this hop crosses the
+#    public internet". The network below therefore pins a 172.28/16 subnet and
+#    gives each Valkey a fixed address inside it. AUTH is required on that hop
+#    too, whatever the address; the generator writes the passwords in.
+#
+#    If 172.28.0.0/16 collides with something on your host, change OA_SUBNET,
+#    the two `ipv4_address` values and the two URLs in `env/*.env` together —
+#    any private range works, none of the public ones do.
+#
+# 3. MIGRATIONS RUN FROM A BUILT IMAGE, AND BEFORE ANY SERVICE STARTS.
+#    The migration CLIs are compiled output (`packages/*/dist/cli.js`), so they
+#    cannot run before the build — the `migrate` service below is the built
+#    image, which is why the ordering works out. Postgres first, then
+#    ClickHouse; every application service waits for it to exit 0.
+#
+# ---------------------------------------------------------------------------
+# Optional pieces, off by default, enabled with `--profile`:
+#   --profile object-storage   MinIO, for data import/export and CSV exports
+#
+# The tracker (`oa.js`) is built by a one-shot container into a shared volume
+# and served by Caddy. See the `tracker-build` service and the Caddyfile.
+
+name: openanalytics
+
+x-node-build: &node-build
+  # The build context is the repository ROOT: these are pnpm workspace packages
+  # whose dependencies resolve through the root lockfile, so an app-scoped
+  # context could not produce a reproducible install.
+  context: ../..
+  dockerfile: infra/docker/node-app.Dockerfile
+  args:
+    # Stamped into the image, not supplied at run time: the commit describes the
+    # image, so a restart with a stale value would relabel the same bytes as a
+    # different commit. `/health` publishes whatever lands here.
+    GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+
+x-node-service: &node-service
+  restart: unless-stopped
+  networks: [oa]
+
+# Each service answers `GET /health` on its own port (packages/observability),
+# returning 503 while a dependency is unavailable. `node -e` rather than curl:
+# the runtime image is node:24-slim, which ships neither curl nor wget.
+x-node-healthcheck: &node-healthcheck
+  test:
+    [
+      'CMD',
+      'node',
+      '-e',
+      "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+    ]
+  interval: 15s
+  timeout: 5s
+  retries: 10
+  start_period: 30s
+
+services:
+  # --- stores ---------------------------------------------------------------
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: oa-postgres
+    restart: unless-stopped
+    env_file: env/postgres.env
+    # No `ports:`. The control plane is reachable from this network and from
+    # nowhere else. To run psql against it: `docker compose exec postgres psql`.
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [oa]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3.17.56
+    container_name: oa-clickhouse
+    restart: unless-stopped
+    # The users and their grants are rendered here at every start. Nothing else
+    # creates them — see the header of the script.
+    entrypoint: ['bash', '/usr/local/bin/oa-entrypoint.sh']
+    env_file: env/clickhouse.env
+    volumes:
+      - ch-data:/var/lib/clickhouse
+      - ./clickhouse/config.d/openanalytics.xml:/etc/clickhouse-server/config.d/openanalytics.xml:ro
+      - ./clickhouse/oa-entrypoint.sh:/usr/local/bin/oa-entrypoint.sh:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # The `default` user is loopback-only by config, which is exactly where
+      # this runs. It proves the server answers; the grants are proven by the
+      # migration step that follows.
+      test: ['CMD', 'clickhouse-client', '--query', 'SELECT 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks: [oa]
+
+  # The durable event queue. Between the collector's 202 and the worker's
+  # insert, this instance holds the only copy of an event.
+  valkey-queue:
+    image: valkey/valkey:8-alpine
+    container_name: oa-valkey-queue
+    restart: unless-stopped
+    entrypoint: ['sh', '/usr/local/bin/oa-valkey-entrypoint.sh']
+    env_file: env/valkey-queue.env
+    volumes:
+      - valkey-queue-data:/data
+      - ./valkey/valkey-queue.conf:/usr/local/etc/valkey/valkey.conf:ro
+      - ./valkey/valkey-entrypoint.sh:/usr/local/bin/oa-valkey-entrypoint.sh:ro
+    healthcheck:
+      # REDISCLI_AUTH rather than `-a`: a password in argv is visible to every
+      # process on the host.
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # A hard cap so realtime pressure can never reach the queue's budget. Keep
+    # it above `maxmemory` in valkey-queue.conf, or the OOM killer arrives
+    # before the noeviction rejection that is supposed to protect the data.
+    mem_limit: 1536m
+    networks:
+      oa:
+        ipv4_address: ${OA_VALKEY_QUEUE_IP:-172.28.0.10}
+
+  # Presence, rate-limit counters, short-lived caches. Losable by design.
+  valkey-realtime:
+    image: valkey/valkey:8-alpine
+    container_name: oa-valkey-realtime
+    restart: unless-stopped
+    entrypoint: ['sh', '/usr/local/bin/oa-valkey-entrypoint.sh']
+    env_file: env/valkey-realtime.env
+    volumes:
+      - valkey-realtime-data:/data
+      - ./valkey/valkey-realtime.conf:/usr/local/etc/valkey/valkey.conf:ro
+      - ./valkey/valkey-entrypoint.sh:/usr/local/bin/oa-valkey-entrypoint.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 768m
+    networks:
+      oa:
+        ipv4_address: ${OA_VALKEY_REALTIME_IP:-172.28.0.11}
+
+  # --- one-shot: schemas ----------------------------------------------------
+
+  # Both stores build from empty. This runs once per `up`, exits, and every
+  # application service waits for it to exit 0 — so a failed migration stops
+  # the deploy instead of producing a fleet of services against a half-built
+  # schema.
+  #
+  # Postgres first, then ClickHouse, and only the PRODUCT schema stream: the
+  # hosted service keeps its commercial tables in a second stream with its own
+  # ledger, which a self-hosted install neither has nor needs.
+  #
+  # Re-runs are safe and are the normal upgrade path: both runners keep a ledger
+  # and apply only what is pending.
+  migrate:
+    build:
+      <<: *node-build
+      args:
+        APP: worker
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    # Its own tag rather than the worker's, so two services never claim to
+    # produce the same image. Same Dockerfile, same layers, so the build is a
+    # cache hit after the worker's.
+    image: openanalytics/migrate:${OA_IMAGE_TAG:-local}
+    container_name: oa-migrate
+    restart: 'no'
+    env_file: env/migrate.env
+    entrypoint:
+      ['sh', '-c', 'node packages/postgres/dist/cli.js && node packages/clickhouse/dist/cli.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    networks: [oa]
+
+  # --- one-shot: the browser tracker ---------------------------------------
+
+  # `oa.js` is a static file, and nothing in the running system serves it: the
+  # hosted deployment publishes it as a deploy artifact, which a self-hosted
+  # install has no equivalent of. So it is built here, once, into a volume that
+  # Caddy serves read-only.
+  #
+  # It is NOT served by the collector, and that is deliberate. A static file has
+  # no business travelling through a Node request pipeline with its logging,
+  # metrics and rate limiting, and the proxy in front already does conditional
+  # requests and compression correctly. It also keeps the file on the host a
+  # customer already points at, so there is no second name to certificate.
+  #
+  # `target: build` because the bundler (esbuild) is a dev dependency and is
+  # deliberately absent from the runtime stage.
+  tracker-build:
+    build:
+      <<: *node-build
+      target: build
+    image: openanalytics/tracker-build:${OA_IMAGE_TAG:-local}
+    container_name: oa-tracker-build
+    restart: 'no'
+    # The build enforces a GZIPPED size budget, so the gzip is written once here
+    # rather than recomputed per request — the bytes on the wire are then the
+    # bytes the budget measured. Caddy's `precompressed gzip` picks whichever
+    # the client can accept. Both files, always together: a stale `.gz` beside a
+    # fresh `.js` is served to almost everyone.
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        pnpm run tracker:build
+        cp apps/tracker/bundle/oa.js /srv/tracker/oa.js
+        gzip -9 -c apps/tracker/bundle/oa.js > /srv/tracker/oa.js.gz
+        ls -l /srv/tracker
+    volumes:
+      - tracker:/srv/tracker
+      # `scripts/` is bind-mounted rather than baked in: the shared Dockerfile
+      # copies only `apps/`, `packages/` and the manifests, so the image holds
+      # the services and nothing else — and `pnpm run tracker:build` is
+      # `node scripts/build-tracker.mjs`. Mounting it here keeps the runtime
+      # images free of build tooling they must not carry.
+      - ../../scripts:/repo/scripts:ro
+    networks: [oa]
+
+  # --- application services -------------------------------------------------
+
+  # The only process allowed to read ClickHouse. It verifies an Ed25519-signed
+  # query envelope minted by the api and runs allow-listed SELECTs; it holds the
+  # PUBLIC verify key and can never mint a request it would accept.
+  gateway:
+    <<: *node-service
+    build:
+      <<: *node-build
+      args:
+        APP: query-gateway
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    image: openanalytics/query-gateway:${OA_IMAGE_TAG:-local}
+    container_name: oa-gateway
+    env_file: env/gateway.env
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # Control plane: auth, sites, keys, event definitions, sharing, the MCP
+  # surface. Holds the PRIVATE half of all three signing pairs and is the only
+  # service that does.
+  #
+  # Start it after the gateway. The api sends a field on every gateway query
+  # that an older gateway rejects outright, so an api-first upgrade breaks
+  # analytics reads for the length of the window while a gateway-first one has
+  # no window at all.
+  api:
+    <<: *node-service
+    build:
+      <<: *node-build
+      args:
+        APP: api
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    image: openanalytics/api:${OA_IMAGE_TAG:-local}
+    container_name: oa-api
+    env_file: env/api.env
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      gateway: { condition: service_healthy }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # Ingest: validates, sanitizes, rate-limits, enqueues. The one service that
+  # ever sees a raw visitor IP, and the only holder of the identity HMAC that
+  # turns one into a daily-rotating anonymous id. It answers 202 the moment the
+  # event is durable in the queue.
+  collector:
+    <<: *node-service
+    build:
+      <<: *node-build
+      args:
+        APP: collector
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    image: openanalytics/collector:${OA_IMAGE_TAG:-local}
+    container_name: oa-collector
+    env_file: env/collector.env
+    volumes:
+      # City-schema GeoIP database, if you have one. Unset, every event carries
+      # null geo — a degradation, never a failure. See SELF-HOSTING.md.
+      - ./geoip:/geoip:ro
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey-queue: { condition: service_healthy }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # Drains the queue into ClickHouse, finalizes sessions, rolls up, delivers
+  # email, executes deletions. The only writer of analytics rows and the only
+  # holder of the ClickHouse credentials that can insert or delete.
+  worker:
+    <<: *node-service
+    build:
+      <<: *node-build
+      args:
+        APP: worker
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    image: openanalytics/worker:${OA_IMAGE_TAG:-local}
+    container_name: oa-worker
+    env_file: env/worker.env
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey-queue: { condition: service_healthy }
+    mem_limit: 768m
+
+  # The SSE stream behind the live dashboard. Verifies short-lived tokens the
+  # api mints and holds the PUBLIC half only.
+  realtime:
+    <<: *node-service
+    build:
+      <<: *node-build
+      args:
+        APP: realtime
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    image: openanalytics/realtime:${OA_IMAGE_TAG:-local}
+    container_name: oa-realtime
+    env_file: env/realtime.env
+    healthcheck: *node-healthcheck
+    depends_on:
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 384m
+
+  # The dashboard. A Next.js app that may import only the OpenAPI contract
+  # package — it talks to the api over HTTP like any other client.
+  #
+  # ITS THREE PUBLIC URLS ARE BAKED IN AT BUILD TIME. `NEXT_PUBLIC_*` values are
+  # inlined into the browser bundle, so changing a hostname means rebuilding
+  # this image: `docker compose build web && docker compose up -d web`. They are
+  # passed as env as well, for the server-rendered half.
+  web:
+    <<: *node-service
+    build:
+      context: ../..
+      dockerfile: infra/selfhost/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${OA_PUBLIC_API_URL:?set OA_PUBLIC_API_URL in infra/selfhost/.env}
+        NEXT_PUBLIC_REALTIME_URL: ${OA_PUBLIC_REALTIME_URL:?set OA_PUBLIC_REALTIME_URL in infra/selfhost/.env}
+        NEXT_PUBLIC_COLLECTOR_URL: ${OA_PUBLIC_COLLECTOR_URL:?set OA_PUBLIC_COLLECTOR_URL in infra/selfhost/.env}
+        GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
+    image: openanalytics/web:${OA_IMAGE_TAG:-local}
+    container_name: oa-web
+    env_file: env/web.env
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      api: { condition: service_started }
+    mem_limit: 768m
+
+  # --- edge -----------------------------------------------------------------
+
+  # TLS termination and the four public names. Read ./Caddyfile before the first
+  # start: it also strips the client-settable identity headers the collector's
+  # rate limiting and geo depend on, and that stripping is a security control,
+  # not tidiness.
+  caddy:
+    image: caddy:2-alpine
+    container_name: oa-caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      OA_APP_HOST: ${OA_APP_HOST:?set OA_APP_HOST in infra/selfhost/.env}
+      OA_API_HOST: ${OA_API_HOST:?set OA_API_HOST in infra/selfhost/.env}
+      OA_COLLECTOR_HOST: ${OA_COLLECTOR_HOST:?set OA_COLLECTOR_HOST in infra/selfhost/.env}
+      OA_REALTIME_HOST: ${OA_REALTIME_HOST:?set OA_REALTIME_HOST in infra/selfhost/.env}
+      OA_ACME_EMAIL: ${OA_ACME_EMAIL:?set OA_ACME_EMAIL in infra/selfhost/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      # Read-only: Caddy serves the tracker and must never be able to change it.
+      - tracker:/srv/tracker:ro
+    depends_on:
+      tracker-build: { condition: service_completed_successfully }
+      api: { condition: service_started }
+      collector: { condition: service_started }
+      realtime: { condition: service_started }
+      web: { condition: service_started }
+    mem_limit: 256m
+    networks: [oa]
+
+  # --- tools ----------------------------------------------------------------
+
+  # Bootstrap the first account when neither OAuth nor a mail transport is
+  # configured yet — otherwise there is no way to sign in at all.
+  #
+  #   docker compose run --rm create-admin --email you@example.com
+  #
+  # The address is required and there is no default worth guessing, so the
+  # arguments after the service name are not optional. A password is generated
+  # and printed once unless ADMIN_PASSWORD is set in the environment.
+  #
+  # It reuses the migrate image (same layers, already built) and bind-mounts
+  # `scripts/`, which the application image deliberately does not carry: the
+  # runtime image holds the compiled services and nothing else. `env/api.env` is
+  # the right environment because this writes an api-shaped user row and needs
+  # the same database URL and auth secret the api uses.
+  #
+  # Password sign-in is off by default; set AUTH_PASSWORD_SIGNIN=enabled in
+  # env/api.env and recreate the api to use the account this makes, then turn it
+  # back off once OAuth or mail works.
+  create-admin:
+    image: openanalytics/migrate:${OA_IMAGE_TAG:-local}
+    profiles: ['tools']
+    restart: 'no'
+    env_file: env/api.env
+    entrypoint: ['node', 'scripts/create-admin.mjs']
+    volumes:
+      - ../../scripts:/repo/scripts:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [oa]
+
+  # --- optional -------------------------------------------------------------
+
+  # S3-compatible object storage, for data import/export. Any S3-compatible
+  # provider works; enable this only if you do not already have one.
+  #   docker compose --profile object-storage up -d
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: oa-minio
+    restart: unless-stopped
+    profiles: ['object-storage']
+    command: ['server', '/data', '--console-address', ':9001']
+    env_file: env/minio.env
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [oa]
+
+networks:
+  oa:
+    driver: bridge
+    ipam:
+      config:
+        # Pinned so the two Valkey instances can have fixed, provably-private
+        # addresses. See note 2 in the header before changing it.
+        - subnet: ${OA_SUBNET:-172.28.0.0/16}
+
+volumes:
+  pg-data:
+  ch-data:
+  valkey-queue-data:
+  valkey-realtime-data:
+  tracker:
+  caddy-data:
+  caddy-config:
+  minio-data:

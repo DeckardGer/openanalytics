@@ -1,0 +1,135 @@
+# TLS front for the four public names. Certificates are issued automatically by
+# Let's Encrypt once the DNS records exist; Caddy keeps retrying until then.
+#
+# The four hostnames and the ACME contact come from the environment, set in
+# `infra/selfhost/.env` and passed through by the compose file:
+#
+#   OA_APP_HOST        the dashboard          app.analytics.example
+#   OA_API_HOST        the control plane      api.analytics.example
+#   OA_COLLECTOR_HOST  ingest, and oa.js      c.analytics.example
+#   OA_REALTIME_HOST   the SSE stream         rt.analytics.example
+#
+# All four must resolve to this host before the first start, or issuance fails
+# and Caddy serves nothing on 443.
+
+{
+	email {$OA_ACME_EMAIL}
+}
+
+# ===========================================================================
+# READ THIS BEFORE CHANGING ANYTHING BELOW.
+#
+# `client_identity_hygiene` is a SECURITY CONTROL, not tidiness. Import it into
+# every route that reaches the collector, the api or the realtime stream.
+#
+# The collector reads the visitor's address from a small list of headers a
+# fronting platform is expected to set from the connection itself — `X-Real-IP`,
+# `CF-Connecting-IP`, `Fly-Client-IP`, `True-Client-IP` — plus country and city
+# headers of the same kind (`apps/collector/src/client-identity.ts`). On a
+# platform like Vercel or Cloudflare that is safe, because the platform
+# overwrites those headers on every request and a client cannot forge one.
+#
+# BEHIND YOUR OWN PROXY, NOTHING OVERWRITES THEM UNLESS YOU DO. A visitor who
+# simply sends `CF-Connecting-IP: 203.0.113.10` would then choose:
+#
+#   * their own rate-limit bucket — send a fresh address per request and the
+#     per-IP limiter never fires, which is the whole of the ingest flood
+#     defence;
+#   * their own anonymous visitor identity, since the daily-rotating hash is
+#     derived from that address — so one client can appear as any number of
+#     distinct visitors, or impersonate another;
+#   * their own country and city in your analytics, by sending the geo headers
+#     directly.
+#
+# The two directives that prevent all three: assert `X-Real-IP` from the actual
+# connection, and DELETE every other header in that list so nothing a client
+# sent can survive. Caddy already replaces `X-Forwarded-For` for untrusted
+# clients by default, and the collector reads its RIGHTMOST entry — the address
+# the closest trusted proxy observed — so a prepended entry buys nothing.
+#
+# If you put another proxy, CDN or load balancer IN FRONT of this one, this
+# snippet becomes wrong as written: it would then assert the address of that
+# proxy for every visitor. Configure the outer layer to set `X-Real-IP` from the
+# connection, keep the deletions here, and drop the `header_up X-Real-IP` line.
+# ===========================================================================
+(client_identity_hygiene) {
+	header_up X-Real-IP {remote_host}
+	header_up -Fly-Client-IP
+	header_up -CF-Connecting-IP
+	header_up -True-Client-IP
+	header_up -X-Vercel-IP-Country
+	header_up -X-Vercel-IP-City
+	header_up -Fly-Client-Country
+	header_up -CF-IPCountry
+	header_up -CF-IPCity
+}
+
+# --- the dashboard ---------------------------------------------------------
+# A Next.js app. It calls the api from the visitor's browser, so the api host
+# below must appear in the api's AUTH_TRUSTED_ORIGINS or every one of those
+# calls dies in CORS.
+{$OA_APP_HOST} {
+	reverse_proxy web:3000
+}
+
+# --- the control plane -----------------------------------------------------
+{$OA_API_HOST} {
+	reverse_proxy api:8082 {
+		import client_identity_hygiene
+	}
+}
+
+# --- ingest, and the tracker itself ----------------------------------------
+# `oa.js` is what a customer pastes into their page, so it is served from the
+# host they already point at — the shape the install snippet uses, and one fewer
+# name to own a certificate for.
+#
+# Caddy serves it, not the collector: a static file has no business travelling
+# through a Node request pipeline with its logging, metrics and rate limiting,
+# and Caddy already does conditional requests and compression correctly. The
+# file is written into the shared `tracker` volume by the one-shot
+# `tracker-build` container.
+{$OA_COLLECTOR_HOST} {
+	handle /oa.js {
+		root * /srv/tracker
+
+		# The filename is stable and never versioned. A versioned name would be
+		# cacheable forever but would make every fix require every site owner to
+		# edit their snippet. So: one hour of freshness, then an ETag
+		# revalidation that costs a 304. That hour is also the ceiling on how
+		# long a broken tracker survives after you have fixed it.
+		header Cache-Control "public, max-age=3600"
+
+		# Not needed to LOAD the script — a classic `<script src>` is not a CORS
+		# request — but it is what lets a site owner add `crossorigin` and get
+		# real messages in `window.onerror` instead of "Script error.". The file
+		# is public by definition; there is nothing to withhold.
+		header Access-Control-Allow-Origin "*"
+
+		# Served precompressed rather than compressed per request: the build
+		# enforces a GZIPPED size budget, and the `tracker-build` container wrote
+		# `oa.js.gz` beside `oa.js`, so the bytes on the wire are the bytes the
+		# budget measured — at no CPU cost per hit. Caddy falls back to the plain
+		# file for a client that does not accept gzip.
+		file_server {
+			precompressed gzip
+		}
+	}
+
+	handle {
+		reverse_proxy collector:8083 {
+			import client_identity_hygiene
+		}
+	}
+}
+
+# --- the realtime stream ---------------------------------------------------
+# `flush_interval -1` disables response buffering so every event leaves the
+# proxy the moment the service writes it. Without it Caddy may hold small chunks
+# and a "realtime" stream arrives in bursts.
+{$OA_REALTIME_HOST} {
+	reverse_proxy realtime:8084 {
+		import client_identity_hygiene
+		flush_interval -1
+	}
+}

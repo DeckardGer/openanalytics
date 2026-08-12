@@ -1,0 +1,27 @@
+{
+  "name": "@openanalytics/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Session, capability and entitlement authorization helpers.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  },
+  "dependencies": {
+    "better-auth": "1.6.23",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/postgres": "workspace:*"
+  }
+}

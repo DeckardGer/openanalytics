@@ -1,0 +1,32 @@
+# Keeps the build context to source and manifests.
+#
+# Without this the context is the whole working tree — node_modules, build
+# output, the Next.js cache and the docs snapshot — which on a remote builder
+# is both slow and unreliable enough to cancel the build outright.
+
+.git/
+node_modules/
+**/node_modules/
+
+# Rebuilt inside the image; copying stale output in would let a local build
+# shadow what the Dockerfile actually compiles.
+dist/
+**/dist/
+**/*.tsbuildinfo
+.next/
+**/.next/
+coverage/
+**/coverage/
+.vitest/
+.eslintcache
+
+# Never let a local credential file reach a layer.
+.env
+.env.*
+!.env.example
+
+docs/
+infra/
+.github/
+**/.DS_Store
+**/Thumbs.db

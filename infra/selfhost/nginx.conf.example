@@ -1,0 +1,186 @@
+# nginx equivalent of ./Caddyfile, for a deployment that already terminates TLS
+# in nginx. It is an EXAMPLE, not a drop-in: fill in the four server names and
+# the certificate paths, and obtain the certificates yourself (certbot or
+# similar). The compose file ships Caddy, which does all of that automatically;
+# this exists because plenty of hosts already have nginx in front.
+#
+# The four upstreams are the compose service names, so this file assumes nginx
+# runs on the compose network. Running nginx on the host instead means
+# publishing each service's port and pointing these at 127.0.0.1 — see
+# SELF-HOSTING.md.
+
+# ===========================================================================
+# READ THIS BEFORE CHANGING ANYTHING BELOW.
+#
+# The `oa_client_identity_hygiene` include is a SECURITY CONTROL, not tidiness.
+#
+# The collector reads the visitor's address from headers a fronting platform is
+# expected to set from the connection itself — X-Real-IP, CF-Connecting-IP,
+# Fly-Client-IP, True-Client-IP — plus country and city headers of the same kind
+# (apps/collector/src/client-identity.ts). Behind your own proxy nothing
+# overwrites those unless you do, so a visitor who simply sends
+# `CF-Connecting-IP: 203.0.113.10` chooses their own rate-limit bucket (defeating
+# ingest flood defence outright), their own anonymous visitor identity (the
+# daily hash is derived from that address), and their own country in your
+# analytics.
+#
+# So: assert X-Real-IP from the real connection, and CLEAR every other header in
+# that list. In nginx, `proxy_set_header NAME "";` removes the header from the
+# upstream request. X-Forwarded-For is appended to rather than replaced, and the
+# collector reads its RIGHTMOST entry — the address the closest trusted proxy
+# observed — so a client-prepended entry buys nothing.
+#
+# If another proxy or CDN sits IN FRONT of nginx, this file becomes wrong as
+# written: it would assert that proxy's address for every visitor. Set X-Real-IP
+# from the outer layer's own connection header instead, and keep every
+# `""` line below.
+# ===========================================================================
+
+# Save as a snippet and `include` it, or paste it into each location block.
+# --- oa_client_identity_hygiene ---
+#   proxy_set_header X-Real-IP          $remote_addr;
+#   proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+#   proxy_set_header X-Forwarded-Proto  $scheme;
+#   proxy_set_header Host               $host;
+#   proxy_set_header Fly-Client-IP      "";
+#   proxy_set_header CF-Connecting-IP   "";
+#   proxy_set_header True-Client-IP     "";
+#   proxy_set_header X-Vercel-IP-Country "";
+#   proxy_set_header X-Vercel-IP-City   "";
+#   proxy_set_header Fly-Client-Country "";
+#   proxy_set_header CF-IPCountry       "";
+#   proxy_set_header CF-IPCity          "";
+# --- end ---
+
+# --- the dashboard ---------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name app.analytics.example;
+
+    ssl_certificate     /etc/letsencrypt/live/app.analytics.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.analytics.example/privkey.pem;
+
+    location / {
+        proxy_pass http://web:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# --- the control plane -----------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name api.analytics.example;
+
+    ssl_certificate     /etc/letsencrypt/live/api.analytics.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.analytics.example/privkey.pem;
+
+    location / {
+        proxy_pass http://api:8082;
+
+        proxy_set_header Host                $host;
+        proxy_set_header X-Real-IP           $remote_addr;
+        proxy_set_header X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto   $scheme;
+        proxy_set_header Fly-Client-IP       "";
+        proxy_set_header CF-Connecting-IP    "";
+        proxy_set_header True-Client-IP      "";
+        proxy_set_header X-Vercel-IP-Country "";
+        proxy_set_header X-Vercel-IP-City    "";
+        proxy_set_header Fly-Client-Country  "";
+        proxy_set_header CF-IPCountry        "";
+        proxy_set_header CF-IPCity           "";
+    }
+}
+
+# --- ingest, and the tracker itself ----------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name c.analytics.example;
+
+    ssl_certificate     /etc/letsencrypt/live/c.analytics.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/c.analytics.example/privkey.pem;
+
+    # The browser tracker. Served as a static file rather than through the
+    # collector: it has no business travelling through a Node request pipeline
+    # with its logging, metrics and rate limiting.
+    #
+    # `gzip_static on` serves the `oa.js.gz` the tracker-build container wrote
+    # beside it, so the bytes on the wire are the bytes the size budget
+    # measured. It requires the ngx_http_gzip_static_module; drop the line and
+    # enable ordinary `gzip` if your build lacks it.
+    #
+    # Mount the compose `tracker` volume at /srv/tracker for this to resolve.
+    location = /oa.js {
+        root /srv/tracker;
+        try_files /oa.js =404;
+        gzip_static on;
+
+        # One hour, then an ETag revalidation that costs a 304. The filename is
+        # never versioned, so this is also the ceiling on how long a broken
+        # tracker survives after you have fixed it.
+        add_header Cache-Control "public, max-age=3600";
+
+        # Not needed to LOAD the script — a classic <script src> is not a CORS
+        # request — but it is what lets a site owner add `crossorigin` and get
+        # real messages in window.onerror instead of "Script error.".
+        add_header Access-Control-Allow-Origin "*";
+    }
+
+    location / {
+        proxy_pass http://collector:8083;
+
+        proxy_set_header Host                $host;
+        proxy_set_header X-Real-IP           $remote_addr;
+        proxy_set_header X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto   $scheme;
+        proxy_set_header Fly-Client-IP       "";
+        proxy_set_header CF-Connecting-IP    "";
+        proxy_set_header True-Client-IP      "";
+        proxy_set_header X-Vercel-IP-Country "";
+        proxy_set_header X-Vercel-IP-City    "";
+        proxy_set_header Fly-Client-Country  "";
+        proxy_set_header CF-IPCountry        "";
+        proxy_set_header CF-IPCity           "";
+    }
+}
+
+# --- the realtime stream ---------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name rt.analytics.example;
+
+    ssl_certificate     /etc/letsencrypt/live/rt.analytics.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rt.analytics.example/privkey.pem;
+
+    location / {
+        proxy_pass http://realtime:8084;
+
+        # Server-sent events. Without these three, nginx buffers the stream and
+        # a "realtime" dashboard arrives in bursts or not at all.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_set_header Host                $host;
+        proxy_set_header X-Real-IP           $remote_addr;
+        proxy_set_header X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto   $scheme;
+        proxy_set_header Fly-Client-IP       "";
+        proxy_set_header CF-Connecting-IP    "";
+        proxy_set_header True-Client-IP      "";
+        proxy_set_header X-Vercel-IP-Country "";
+        proxy_set_header X-Vercel-IP-City    "";
+        proxy_set_header Fly-Client-Country  "";
+        proxy_set_header CF-IPCountry        "";
+        proxy_set_header CF-IPCity           "";
+    }
+}

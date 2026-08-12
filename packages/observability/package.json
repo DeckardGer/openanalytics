@@ -1,0 +1,30 @@
+{
+  "name": "@openanalytics/observability",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Structured logging, redaction, request/trace context and service metadata.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./hono": {
+      "types": "./dist/hono/index.d.ts",
+      "default": "./dist/hono/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean"
+  },
+  "dependencies": {
+    "@openanalytics/contracts": "workspace:*",
+    "hono": "4.12.31"
+  }
+}

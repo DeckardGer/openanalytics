@@ -1,0 +1,33 @@
+{
+  "name": "@openanalytics/query-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Host-side typed query RPC in front of private ClickHouse.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "clean": "tsc --build tsconfig.json --clean",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.10",
+    "hono": "4.12.31",
+    "@openanalytics/contracts": "workspace:*",
+    "@openanalytics/domain": "workspace:*",
+    "@openanalytics/observability": "workspace:*",
+    "zod": "4.4.3",
+    "@openanalytics/auth": "workspace:*",
+    "ioredis": "5.11.1"
+  }
+}

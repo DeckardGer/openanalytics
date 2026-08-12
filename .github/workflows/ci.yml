@@ -1,0 +1,334 @@
+name: CI
+
+# Fork-safe by construction: no secrets are read anywhere in this workflow —
+# every backing store is an ephemeral service container with throwaway
+# credentials. The token is pinned to read-only so a fork PR cannot use it.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Lets any ref be run on demand — without it, the only way to test a commit
+  # whose run never started is to push another commit on top of it, which tests
+  # a different tree than the one that went untested.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Local development, CI and production all pin the same exact patch.
+  NODE_VERSION: '24.18.0'
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # A clean install from the committed lockfile. If the lockfile is stale,
+      # this fails rather than quietly resolving something else.
+      - run: pnpm install --frozen-lockfile
+
+      # Runs first: it is the fastest check and catches the one thing this
+      # repository must never contain — a runtime import of the legacy app.
+      - name: Architectural boundaries
+        run: pnpm run boundaries
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: OpenAPI lint
+        run: pnpm run contracts:lint
+
+      # Proves the committed generated client still matches openapi.yaml.
+      - name: Generated client is in sync
+        run: pnpm run contracts:check
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      # Acceptance criterion 5 (Milestone 7): the generated client compiles in an
+      # apps/web-like consumer that sees only the published package. `typecheck`
+      # above builds the contracts `dist` the smoke project resolves against.
+      - name: Frontend client smoke build
+        run: pnpm run contracts:smoke
+
+  test:
+    name: Unit and contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test
+
+      # The tracker runs on customers' sites, so its size is their cost, paid on
+      # every page load. The budget and its justification are in ADR-0008.
+      - name: Tracker size budget
+        run: pnpm run tracker:build
+
+  web:
+    name: Web lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # apps/web keeps its own eslint-config-next setup; the root lint job
+      # deliberately ignores it (D-218 — separate toolchains, one repo).
+      - name: Lint web
+        run: pnpm --filter web lint
+
+      # `next build` also typechecks the app, so this is the web equivalent of
+      # the backend's typecheck + build steps.
+      - name: Build web
+        run: pnpm --filter web build
+
+  integration:
+    name: Integration skeleton
+    runs-on: ubuntu-latest
+
+    # The Milestone 5 collector suite needs a real Valkey: what it proves is
+    # that the enqueue EVAL is genuinely uninterruptible and that a conflict
+    # leaves nothing enqueued, and a local double would only prove our
+    # TypeScript (ADR-0004, ADR-0009). Configured the way D-205 requires the
+    # queue instance to run, so CI exercises the production settings:
+    # `noeviction` (an evicted key here is a lost event) and AOF.
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      # The Milestone 6 crash matrix needs all three stores at once. Its
+      # subject is what happens *between* them — a ClickHouse insert token
+      # reaching a materialized view, a Postgres unique constraint under a real
+      # transaction, and a consumer group's pending list — so a double for any
+      # one of them would leave the suite proving our TypeScript.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: openanalytics
+          POSTGRES_PASSWORD: openanalytics
+          POSTGRES_DB: openanalytics_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U openanalytics -d openanalytics_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      # No container health check, for the reason the migrations job records:
+      # the probe runs inside the image and busybox wget fails for reasons that
+      # have nothing to do with ClickHouse being ready. Waited for from the
+      # runner instead.
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.3-alpine
+        env:
+          CLICKHOUSE_USER: openanalytics
+          CLICKHOUSE_PASSWORD: openanalytics
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        ports: ['8123:8123']
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Integration tests spawn the real build output, so a broken exports map or
+      # a bootstrap that never binds a port is caught here rather than on deploy.
+      - name: Build
+        run: pnpm run build
+
+      # Started as a step rather than as a `services:` container: the official
+      # image needs `server /data` as its command, and service containers can
+      # only supply an image plus options, never arguments. `bitnami/minio`,
+      # which does start a server unattended, no longer publishes public tags.
+      #
+      # Pinned to a release rather than `latest` for the same reason Node and
+      # ClickHouse are pinned — a floating tag makes CI results depend on when
+      # they ran (D-203).
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+
+      - name: Wait for MinIO
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:9000/minio/health/live > /dev/null; then
+              echo "minio ready after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "minio did not become live within 120s; last attempt:"
+          curl -vsS http://localhost:9000/minio/health/live || true
+          docker logs minio || true
+          exit 1
+
+      # `noeviction` is D-205's requirement for the queue instance and the one
+      # setting ADR-0004 found inverted in production. Applied at runtime rather
+      # than baked in, because a service container takes no command arguments.
+      - name: Configure Valkey the way D-205 requires
+        run: |
+          container=$(docker ps -qf ancestor=valkey/valkey:8-alpine)
+          docker exec "$container" valkey-cli config set maxmemory-policy noeviction
+          docker exec "$container" valkey-cli config set appendonly yes
+
+      - name: Wait for ClickHouse
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8123/ping > /dev/null; then
+              echo "clickhouse ready after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "clickhouse did not answer /ping within 120s; last attempt:"
+          curl -vsS http://localhost:8123/ping || true
+          exit 1
+
+      - name: Integration tests
+        # MinIO stands in for the object storage provider G-001 has not chosen.
+        # The suites needing Fly infrastructure skip themselves; the MinIO and
+        # Valkey ones run for real.
+        #
+        # `redis://` rather than `rediss://`: the connection factory requires TLS
+        # and AUTH for the collector hop because it crosses the public internet
+        # (D-206), and a loopback service container is not that hop. The M1 live
+        # suite is what exercises the TLS+AUTH path, against the deployed
+        # instance.
+        env:
+          TEST_S3_ENDPOINT: http://localhost:9000
+          TEST_S3_ACCESS_KEY: minioadmin
+          TEST_S3_SECRET_KEY: minioadmin
+          TEST_VALKEY_URL: redis://localhost:6379
+          TEST_POSTGRES_URL: postgres://openanalytics:openanalytics@localhost:5432/openanalytics_test
+          TEST_CLICKHOUSE_URL: http://localhost:8123
+          TEST_CLICKHOUSE_USER: openanalytics
+          TEST_CLICKHOUSE_PASSWORD: openanalytics
+        run: pnpm run test:integration
+
+  migrations:
+    name: Empty-database migrations
+    runs-on: ubuntu-latest
+
+    # Docs snapshot 02 §15: both stores must be buildable from empty in CI. This
+    # is the check the legacy migration history could not pass (docs snapshot
+    # 01 §3.6).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: openanalytics
+          POSTGRES_PASSWORD: openanalytics
+          POSTGRES_DB: openanalytics_test
+        ports: ['5432:5432']
+        # `-d` is explicit: pg_isready defaults the database name to the user
+        # name, so without it the probe repeatedly asks for a database that was
+        # never created and fills the log with misleading FATAL lines.
+        options: >-
+          --health-cmd "pg_isready -U openanalytics -d openanalytics_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      # Deliberately no container health check. A `--health-cmd` runs *inside*
+      # the image, so it depends on which tools that image happens to ship;
+      # busybox wget in the alpine variant does not handle `--spider` the way
+      # GNU wget does, and the probe fails for a reason that has nothing to do
+      # with ClickHouse being ready. Readiness is waited for from the runner
+      # instead, where the toolchain is known and a failure is legible.
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.3-alpine
+        env:
+          CLICKHOUSE_USER: openanalytics
+          CLICKHOUSE_PASSWORD: openanalytics
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        ports: ['8123:8123']
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Wait for ClickHouse
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8123/ping > /dev/null; then
+              echo "clickhouse ready after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "clickhouse did not answer /ping within 120s; last attempt:"
+          # Unsuppressed so the actual transport error reaches the log rather
+          # than the job failing with no explanation.
+          curl -vsS http://localhost:8123/ping || true
+          exit 1
+
+      # The migrator runs from `dist`, so the assertion below needs a build. The
+      # migration tests themselves run from source.
+      - name: Build
+        run: pnpm run build
+
+      # This repository is the product without the hosted service's commercial
+      # half, and that claim is checked against a database rather than against a
+      # file list: `pnpm run migrate:postgres` builds the schema, and the script
+      # asserts that the product tables are there and that none of the billing,
+      # trial or metering-window tables are.
+      - name: Product schema has no commercial tables
+        env:
+          TEST_POSTGRES_URL: postgres://openanalytics:openanalytics@localhost:5432/openanalytics_test
+        run: pnpm run schema:product
+
+      - name: Migration tests against empty databases
+        env:
+          TEST_POSTGRES_URL: postgres://openanalytics:openanalytics@localhost:5432/openanalytics_test
+          TEST_CLICKHOUSE_URL: http://localhost:8123
+          TEST_CLICKHOUSE_USER: openanalytics
+          TEST_CLICKHOUSE_PASSWORD: openanalytics
+        run: pnpm run test:migration

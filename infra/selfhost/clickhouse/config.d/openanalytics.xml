@@ -1,0 +1,23 @@
+<clickhouse>
+  <!--
+    Bind every interface the container has. That is not a hole: the compose
+    file publishes NO port for this service, so the only things that can reach
+    it are the containers on the same compose network. The hosted service binds
+    two named addresses instead, because its ClickHouse runs on a VM with a
+    public IP where the binding itself is the boundary.
+
+    If you move ClickHouse onto a host others can route to, bind the private
+    address here and set OA_CLICKHOUSE_ALLOWED_NETWORK on the container.
+  -->
+  <listen_host>0.0.0.0</listen_host>
+
+  <!-- HTTP for the query gateway and the migration runner; the native protocol
+       for the worker's inserts. -->
+  <http_port>8123</http_port>
+  <tcp_port>9000</tcp_port>
+
+  <logger>
+    <level>information</level>
+    <console>1</console>
+  </logger>
+</clickhouse>

@@ -1,0 +1,68 @@
+-- ============================================================================
+-- 0019 -- `fee_currency` on the revenue fact (ADR-0033, D2d amendment)
+-- ============================================================================
+--
+-- M12 shipped `fee_minor` and never filled it. Every row carried 0, and the
+-- reason was recorded honestly at the time: Stripe reports fees on the balance
+-- transaction, not on the charge, and reading one per object looked like a
+-- request per object across a ninety-day backfill.
+--
+-- It is not. Stripe resolves `expand[]=data.balance_transaction` inside the
+-- response it was already sending, so a page of a hundred charges costs exactly
+-- what it cost before. The fee is now read on both fetch paths that can carry
+-- an expansion.
+--
+-- What that surfaces is a currency question the fee columns had no way to
+-- answer. A balance transaction is denominated in the ACCOUNT's settlement
+-- currency. For the ordinary account -- charging in the currency it settles in
+-- -- that is the charge's own currency and nothing is different. For an account
+-- that charges in a currency it does not settle in, the fee is a real number in
+-- a currency the row's `gross_minor` is not in, and `gross - fee` across the two
+-- is not a smaller number but a meaningless one.
+--
+-- So the fee gets its own currency column, and `fee_minor` stops being a number
+-- that means three things:
+--
+--   fee_currency = ''            -- UNKNOWN. Not read (a webhook payload cannot
+--                                   expand) or not settled yet. `fee_minor` is 0
+--                                   and `net_minor` equals `gross_minor`.
+--   fee_currency = currency      -- the ordinary case. `net_minor` is
+--                                   `gross_minor - fee_minor` and the rollup's
+--                                   `fee = reporting_gross - reporting_net`
+--                                   identity holds exactly.
+--   fee_currency <> currency     -- a real fee in the settlement currency.
+--                                   `net_minor` stays at `gross_minor` because
+--                                   the deduction is not expressible here, and
+--                                   this column is what makes that visible
+--                                   instead of silent.
+--
+-- The distinction between the first and the second is the whole point. A
+-- `fee_minor` of 0 that might mean "free" and might mean "we did not look" is
+-- the confident zero this milestone is named after (docs snapshot 01 section
+-- 12.3), and it is the one shape of wrongness the revenue layer is not allowed
+-- to ship.
+--
+-- ============================================================================
+-- Why a plain ADD COLUMN is safe here
+-- ============================================================================
+--
+-- `revenue_events` is a ReplacingMergeTree over `version` and nothing reads this
+-- column yet, so the default applies to every existing row and no read changes
+-- meaning. The default is the EMPTY STRING rather than `currency`, and that is
+-- deliberate: every row written before this migration was written with an
+-- unread fee, so "unknown" is what those rows actually are. Defaulting to
+-- `currency` would relabel a whole history of unread fees as observed zeros --
+-- the exact confusion the column exists to prevent.
+--
+-- Rows refill as the reconcile sweep re-lists them. Adding the column to the
+-- normalized snapshot changes its payload hash, so a re-listed object no longer
+-- matches what is stored and the three-way rule re-applies it with the fee in
+-- place. That repairs every object whose stored snapshot ties the object's
+-- `created` -- see the ADR amendment for which ones it cannot reach and why.
+--
+-- No materialized view reads this table (0016 says so and still holds), so
+-- there is no view target to migrate in step with it.
+
+ALTER TABLE revenue_events
+  ADD COLUMN IF NOT EXISTS fee_currency LowCardinality(String) DEFAULT ''
+  AFTER fee_minor;

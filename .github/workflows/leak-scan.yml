@@ -1,0 +1,40 @@
+name: Leak scan
+
+# The pre-merge credential check (ADR-0062 § c). Until 2026-08-12 this
+# repository received only verified exports, and the export script was what
+# grepped the tree for credential shapes before anything was published. Now that
+# code arrives here by being merged, the same net has to sit on the merge.
+#
+# It is deliberately the cheapest job in the repository — no install, no cache,
+# no service containers, pure Node over the tracked files — because a gate that
+# takes as long as the test suite is one people learn to start a merge without.
+#
+# Fork-safe: no secrets are read, and the token is read-only, so a pull request
+# from a fork runs it exactly the way a branch does.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Credential patterns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24.18.0'
+
+      # A finding prints the file and a truncated sample, never the value.
+      - name: Scan the tracked tree for credential shapes
+        run: node scripts/leak-scan.mjs

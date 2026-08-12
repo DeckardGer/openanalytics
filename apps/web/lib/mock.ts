@@ -1,0 +1,493 @@
+import {
+  analyticsOverviewFixture,
+  analyticsSessionsFixture,
+  createdSiteFixture,
+  publicDashboardSettingsFixture,
+  publicGeographyFixture,
+  publicOverviewFixture,
+  publicSiteIdentityFixture,
+  realtimeSnapshotFixture,
+  siteInviteFixture,
+} from "@openanalytics/contracts";
+import type {
+  AnalyticsCustomEventsResponse,
+  AnalyticsDevicesResponse,
+  AnalyticsGeographyResponse,
+  AnalyticsMeta,
+  AnalyticsPagesResponse,
+  AnalyticsPerformanceResponse,
+  AnalyticsSourcesResponse,
+  ApiKeySummary,
+  ConnectedApp,
+  CreatedSite,
+  ExportRun,
+  ImportProvider,
+  ImportRun,
+  PublicDashboardSettings,
+  RevenueSummaryResponse,
+  SiteInvite,
+  SiteMember,
+  SiteSummary,
+} from "@/lib/api";
+
+/**
+ * The one home of mock data for the wired screens, active only when
+ * `NEXT_PUBLIC_MOCK_API=1` asks for it. Everything here is typed by the contracts
+ * package, so the mocks cannot drift from what the api will actually send —
+ * flipping to live changes the data source, never the shapes.
+ */
+
+export const MOCK_SITES: SiteSummary[] = [
+  {
+    site_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8c9d",
+    slug: "openanalytics",
+    name: "openanalytics.io",
+    status: "active",
+    role: "owner",
+    is_billing_owner: true,
+    domains: ["openanalytics.io"],
+    created_at: "2025-11-04T09:12:00.000Z",
+    // Data has flowed: onboarding's "tracker installed" step is done.
+    first_event_at: "2025-11-04T09:41:07.000Z",
+    // Not blocked: all three lifecycle instants are null together (ADR-0030).
+    suspended_at: null,
+    ingest_grace_until: null,
+    retention_deadline: null,
+    reporting_currency: "USD",
+    // The owner picked a reporting clock (ADR-0044). The other two mocks leave
+    // it null, which is the default and means "the viewer's own clock applies".
+    reporting_timezone: "Europe/Istanbul",
+  },
+  {
+    site_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8d01",
+    slug: "acme",
+    name: "acme.com",
+    status: "active",
+    role: "admin",
+    is_billing_owner: false,
+    domains: ["acme.com", "www.acme.com"],
+    created_at: "2026-01-19T14:40:00.000Z",
+    first_event_at: "2026-01-19T15:02:33.000Z",
+    suspended_at: null,
+    ingest_grace_until: null,
+    retention_deadline: null,
+    reporting_currency: "USD",
+    reporting_timezone: null,
+  },
+  {
+    site_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8d02",
+    slug: "acme-blog",
+    name: "blog.acme.com",
+    status: "active",
+    role: "viewer",
+    is_billing_owner: false,
+    domains: [],
+    created_at: "2026-05-27T08:05:00.000Z",
+    // Never installed: the one case the onboarding step exists for.
+    first_event_at: null,
+    suspended_at: null,
+    ingest_grace_until: null,
+    retention_deadline: null,
+    reporting_currency: "USD",
+    reporting_timezone: null,
+  },
+];
+
+export function mockSiteBySlug(slug: string): SiteSummary {
+  return MOCK_SITES.find((site) => site.slug === slug) ?? MOCK_SITES[0];
+}
+
+/** The contract's member row now carries the person's email and display name. */
+export const MOCK_MEMBERS: SiteMember[] = [
+  {
+    user_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8c11",
+    role: "owner",
+    email: "owner@example.com",
+    name: "Ada Lovelace",
+  },
+  {
+    user_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8c12",
+    role: "admin",
+    email: "admin@example.com",
+    name: "Grace Hopper",
+  },
+  {
+    user_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8c13",
+    role: "viewer",
+    email: "viewer@example.com",
+    // Null is the "never set a display name" case the contract distinguishes.
+    name: null,
+  },
+];
+
+/** The signed-in user in mock mode — the first member, the billing owner. */
+export const MOCK_SELF_USER_ID = MOCK_MEMBERS[0].user_id;
+
+export const MOCK_INVITES: SiteInvite[] = [siteInviteFixture];
+
+/**
+ * The connected-apps list, one of each kind the endpoint can return: a
+ * dynamically registered MCP client (a `dcr_…` id resolving to the name it
+ * registered under) and a first-party client (`oa-cli`, resolving to the
+ * product name). Scope descriptions are the consent screen's sentences.
+ */
+export const MOCK_CONNECTED_APPS: ConnectedApp[] = [
+  {
+    client_id: "dcr_k3mv82hqidzr1wgy",
+    name: "Claude",
+    scopes: [
+      { scope: "site:read", description: "See your sites and their settings" },
+      { scope: "analytics:read", description: "Read your traffic numbers" },
+      { scope: "revenue:read", description: "Read your revenue numbers" },
+      { scope: "funnels:write", description: "Create and edit funnels" },
+    ],
+    active_token_count: 1,
+    first_authorized_at: "2026-08-01T09:12:00Z",
+    last_authorized_at: "2026-08-07T18:40:00Z",
+  },
+  {
+    client_id: "oa-cli",
+    name: "Open Analytics CLI",
+    scopes: [
+      { scope: "site:read", description: "See your sites and their settings" },
+      { scope: "analytics:read", description: "Read your traffic numbers" },
+    ],
+    active_token_count: 2,
+    first_authorized_at: "2026-07-21T14:03:00Z",
+    last_authorized_at: "2026-08-05T08:27:00Z",
+  },
+];
+
+export const MOCK_KEYS: ApiKeySummary[] = [
+  {
+    id: "key_01",
+    type: "tracking_write",
+    name: "Website",
+    key_prefix: "oa_pk_7f3a",
+    public_token: createdSiteFixture.tracking_key.public_token,
+    // null, not an empty array: a tracking key carries no scopes at all
+    // (ADR-0042, D3), which is a different statement from carrying none of them.
+    scopes: null,
+    // Installed into the website itself, so it outlives whoever pasted it
+    // there (ADR-0043, D8).
+    held_by: "site",
+    rotation_required_at: null,
+    created_at: "2026-05-02T10:12:00.000Z",
+    last_used_at: "2026-07-25T08:00:00.000Z",
+    revoked_at: null,
+    expires_at: null,
+  },
+  {
+    id: "key_02",
+    type: "private_read",
+    name: "Grafana",
+    key_prefix: "oa_sk_4f2c",
+    public_token: null,
+    // The minimum, which is what a key minted before scopes existed reads as —
+    // deliberately not `analytics:read`, so the mock shows the case the keys
+    // page has to handle: an existing key that cannot read analytics.
+    scopes: ["site:read"],
+    // The default custody: the person who minted it kept the secret.
+    held_by: "user",
+    rotation_required_at: null,
+    created_at: "2026-06-18T08:41:00.000Z",
+    last_used_at: null,
+    revoked_at: null,
+    expires_at: null,
+  },
+];
+
+export const MOCK_PUBLIC_DASHBOARD: PublicDashboardSettings =
+  publicDashboardSettingsFixture;
+
+/** The identity-on shape (ADR-0044), so the share header stays designable. */
+export const MOCK_PUBLIC_SITE_IDENTITY = publicSiteIdentityFixture;
+
+export const MOCK_CREATED_SITE: CreatedSite = createdSiteFixture;
+
+/** The dashboard's own overview — comparison and all. */
+export const MOCK_OVERVIEW = analyticsOverviewFixture;
+/** The share page's overview — `PublicOverviewResponse` dropped
+ * `billable_events` and `comparison` (ADR-0039), so the two mocks split. */
+export const MOCK_PUBLIC_OVERVIEW = publicOverviewFixture;
+export const MOCK_PUBLIC_GEOGRAPHY = publicGeographyFixture;
+export const MOCK_SESSIONS = analyticsSessionsFixture;
+
+/* Analytics panel mocks — the series the overview screen was designed on,
+   typed by the contract so they cannot drift from what the api sends. */
+
+const MOCK_ANALYTICS_META: AnalyticsMeta = {
+  requested_range: {
+    from: "2026-07-19T00:00:00.000Z",
+    to: "2026-07-26T00:00:00.000Z",
+  },
+  effective_range: {
+    from: "2026-07-19T00:00:00.000Z",
+    to: "2026-07-26T00:00:00.000Z",
+  },
+  timezone: "UTC",
+  resolution: "hour",
+  accuracy: "exact",
+  data_sources: ["live"],
+  freshness: {
+    state: "ok",
+    watermark: "2026-07-25T23:00:00.000Z",
+    as_of: "2026-07-26T00:03:00.000Z",
+  },
+  comparison_range: null,
+  truncated: false,
+  cached: false,
+  partial: false,
+};
+
+export const MOCK_PAGES: AnalyticsPagesResponse = {
+  meta: MOCK_ANALYTICS_META,
+  items: [
+    { page_path: "/", views: 7412, visitors: 3218 },
+    { page_path: "/pricing", views: 4102, visitors: 1874 },
+    { page_path: "/blog/why-we-left-ga", views: 2988, visitors: 1402 },
+    { page_path: "/docs", views: 2140, visitors: 986 },
+    { page_path: "/changelog", views: 1201, visitors: 512 },
+  ],
+};
+
+export const MOCK_SOURCES: AnalyticsSourcesResponse = {
+  meta: MOCK_ANALYTICS_META,
+  items: [
+    { referrer_domain: "google.com", utm_source: "", utm_medium: "", utm_campaign: "", views: 6320, visitors: 2941 },
+    { referrer_domain: "", utm_source: "", utm_medium: "", utm_campaign: "", views: 4805, visitors: 2210 },
+    { referrer_domain: "news.ycombinator.com", utm_source: "", utm_medium: "", utm_campaign: "", views: 2911, visitors: 1345 },
+    { referrer_domain: "x.com", utm_source: "", utm_medium: "", utm_campaign: "", views: 1984, visitors: 918 },
+    { referrer_domain: "github.com", utm_source: "", utm_medium: "", utm_campaign: "", views: 1310, visitors: 604 },
+  ],
+};
+
+export const MOCK_GEOGRAPHY: AnalyticsGeographyResponse = {
+  meta: MOCK_ANALYTICS_META,
+  items: [
+    { country: "DE", city: "Berlin", views: 4020, visitors: 1893 },
+    { country: "US", city: "New York", views: 3311, visitors: 1544 },
+    { country: "TR", city: "Istanbul", views: 2402, visitors: 1102 },
+    { country: "GB", city: "London", views: 2130, visitors: 986 },
+    { country: "NL", city: "Amsterdam", views: 1754, visitors: 812 },
+    { country: "FR", city: "Paris", views: 1521, visitors: 705 },
+    { country: "AZ", city: "Baku", views: 1340, visitors: 623 },
+    { country: "ES", city: "Madrid", views: 1160, visitors: 541 },
+    { country: "CA", city: "Toronto", views: 1071, visitors: 498 },
+    { country: "JP", city: "Tokyo", views: 860, visitors: 402 },
+    { country: "IN", city: "Bengaluru", views: 774, visitors: 361 },
+    { country: "BR", city: "São Paulo", views: 683, visitors: 318 },
+    { country: "PL", city: "Warsaw", views: 590, visitors: 274 },
+    { country: "AU", city: "Sydney", views: 497, visitors: 231 },
+    { country: "SE", city: "Stockholm", views: 405, visitors: 189 },
+  ],
+};
+
+export const MOCK_DEVICES: AnalyticsDevicesResponse = {
+  meta: MOCK_ANALYTICS_META,
+  items: [
+    { device_type: "desktop", browser: "Chrome", os: "Windows", views: 6980, visitors: 3120 },
+    { device_type: "desktop", browser: "Safari", os: "macOS", views: 3120, visitors: 1411 },
+    { device_type: "mobile", browser: "Chrome", os: "Android", views: 2904, visitors: 1114 },
+    { device_type: "mobile", browser: "Safari", os: "iOS", views: 3480, visitors: 1619 },
+    { device_type: "desktop", browser: "Firefox", os: "Linux", views: 1490, visitors: 689 },
+    { device_type: "desktop", browser: "Edge", os: "Windows", views: 1108, visitors: 512 },
+    { device_type: "tablet", browser: "Safari", os: "iPadOS", views: 1010, visitors: 471 },
+    { device_type: "desktop", browser: "Arc", os: "macOS", views: 640, visitors: 297 },
+    { device_type: "desktop", browser: "Brave", os: "Windows", views: 561, visitors: 260 },
+    { device_type: "mobile", browser: "Samsung Internet", os: "Android", views: 399, visitors: 184 },
+    { device_type: "unknown", browser: "unknown", os: "unknown", views: 190, visitors: 88 },
+  ],
+};
+
+/**
+ * Deliberately mixed: renamed events (a definition supplied `display_name`,
+ * which the server join carries), raw `track()` names as sent
+ * (`display_name: null`), and one conversion. The counts descend so the
+ * list reads sorted.
+ */
+export const MOCK_CUSTOM_EVENTS: AnalyticsCustomEventsResponse = {
+  meta: MOCK_ANALYTICS_META,
+  items: [
+    {
+      event_name: "signup_completed",
+      event_type: "conversion",
+      events: 1284,
+      billable_events: 1284,
+      visitors: 1201,
+      display_name: "Signed up",
+      display_template: null,
+      last_seen_at: "2026-07-07T18:42:11.000Z",
+      sample_page_path: "/signup",
+      sample_properties: { plan: "pro", section: "hero" },
+    },
+    {
+      event_name: "pricing_cta_click",
+      event_type: "custom",
+      events: 972,
+      billable_events: 972,
+      visitors: 803,
+      display_name: "Clicked pricing CTA",
+      display_template: 'Clicked "{{button_label}}" on {{page_path}}',
+      last_seen_at: "2026-07-07T17:05:44.000Z",
+      sample_page_path: "/pricing",
+      sample_properties: { "button-label": "Start free", section: "pricing" },
+    },
+    {
+      event_name: "newsletter_submit",
+      event_type: "custom",
+      events: 441,
+      billable_events: 441,
+      visitors: 428,
+      display_name: "Joined newsletter",
+      display_template: null,
+      last_seen_at: "2026-07-07T11:20:03.000Z",
+      sample_page_path: "/blog/why-privacy-first-analytics",
+      // Fired carrying nothing. `{}` is a different fact from `null` —
+      // "no properties" versus "this surface has nothing to say".
+      sample_properties: {},
+    },
+    {
+      event_name: "video_play",
+      event_type: "custom",
+      events: 389,
+      billable_events: 389,
+      visitors: 274,
+      display_name: null,
+      display_template: null,
+      last_seen_at: "2026-07-06T20:11:00.000Z",
+      sample_page_path: "/product-tour",
+      sample_properties: { position: "hero" },
+    },
+    {
+      event_name: "docs_feedback",
+      event_type: "custom",
+      events: 57,
+      billable_events: 57,
+      visitors: 55,
+      display_name: null,
+      display_template: null,
+      // The absent case, on purpose: an imported row carries no event
+      // instant, so the expansion has to look right with all three gone.
+      last_seen_at: null,
+      sample_page_path: null,
+      sample_properties: null,
+    },
+  ],
+};
+
+export const MOCK_PERFORMANCE: AnalyticsPerformanceResponse = {
+  meta: MOCK_ANALYTICS_META,
+  items: [
+    { metric: "LCP", device_type: "desktop", samples: 9800, mean: 1820.4, p50: 1700, p75: 1800, p90: 2600, p95: 3100, p99: 4200, good_samples: 8600, needs_improvement_samples: 900, poor_samples: 300 },
+    { metric: "INP", device_type: "desktop", samples: 9100, mean: 152.2, p50: 120, p75: 140, p90: 240, p95: 330, p99: 520, good_samples: 8200, needs_improvement_samples: 700, poor_samples: 200 },
+    { metric: "CLS", device_type: "desktop", samples: 9400, mean: 0.05, p50: 0.03, p75: 0.04, p90: 0.09, p95: 0.14, p99: 0.31, good_samples: 8800, needs_improvement_samples: 450, poor_samples: 150 },
+    { metric: "FCP", device_type: "desktop", samples: 9700, mean: 1240.8, p50: 1100, p75: 1200, p90: 1900, p95: 2400, p99: 3600, good_samples: 8500, needs_improvement_samples: 950, poor_samples: 250 },
+    { metric: "TTFB", device_type: "desktop", samples: 9800, mean: 710.5, p50: 540, p75: 620, p90: 1300, p95: 1900, p99: 2900, good_samples: 6900, needs_improvement_samples: 2200, poor_samples: 700 },
+  ],
+};
+
+export const MOCK_REALTIME_SNAPSHOT = realtimeSnapshotFixture;
+
+/**
+ * Revenue (M12, ADR-0033) — the connected reading the card was designed for.
+ *
+ * Every figure is integer minor units of `totals.currency`, and the identity
+ * closes exactly: 26772 − 6100 − 900 + 900 − 256 = 20416. It is written out
+ * rather than computed so a broken card cannot be rescued by a mock that
+ * agrees with it.
+ *
+ * Two details are deliberate rather than decorative. The **dispute appears in
+ * both columns** — a won dispute, whose net effect is zero while the event
+ * stays visible — because rendering `dispute_withdrawn_minor` alone as "lost"
+ * is the mistake the pair exists to prevent. And `unconverted_count` is
+ * non-zero with an ISK residue beside it, so design mode shows the footnote
+ * rather than the happy path where every transaction converted.
+ */
+export const MOCK_REVENUE_SUMMARY: RevenueSummaryResponse = {
+  meta: {
+    ...MOCK_ANALYTICS_META,
+    revenue: {
+      provider: "stripe",
+      connection_status: "connected",
+      last_synced_at: "2026-08-01T09:40:00.000Z",
+      last_webhook_at: "2026-08-01T09:44:00.000Z",
+      rollup_through: "2026-08-01T09:40:00.000Z",
+    },
+  },
+  totals: {
+    currency: "USD",
+    charge_gross_minor: 26_772,
+    refund_minor: 6100,
+    dispute_withdrawn_minor: 900,
+    dispute_reinstated_minor: 900,
+    fee_minor: 256,
+    net_minor: 20_416,
+    charge_count: 34,
+    refund_count: 3,
+    dispute_count: 1,
+    unconverted_count: 3,
+  },
+  comparison: {
+    totals: {
+      currency: "USD",
+      charge_gross_minor: 21_400,
+      refund_minor: 2200,
+      dispute_withdrawn_minor: 0,
+      dispute_reinstated_minor: 0,
+      fee_minor: 204,
+      net_minor: 18_996,
+      charge_count: 27,
+      refund_count: 1,
+      dispute_count: 0,
+      unconverted_count: 0,
+    },
+  },
+  unconverted: [
+    {
+      currency: "ISK",
+      charge_gross_minor: 249_000,
+      refund_minor: 0,
+      dispute_minor: 0,
+      transactions: 3,
+    },
+  ],
+};
+
+/**
+ * Import / export (M11). The catalog is what a build with only the Plausible
+ * adapter answers; the runs and exports are empty because the interesting
+ * states — review, published, expired — are reached by acting on the screen,
+ * and a fixture that pre-loaded one would hide the first step from whoever is
+ * designing against it.
+ */
+export const MOCK_IMPORT_PROVIDERS: ImportProvider[] = [
+  {
+    id: "plausible",
+    display_name: "Plausible",
+    capability: "aggregate_only",
+    available: true,
+  },
+  {
+    id: "fathom",
+    display_name: "Fathom",
+    capability: "aggregate_only",
+    available: false,
+  },
+  {
+    id: "simple_analytics",
+    display_name: "Simple Analytics",
+    capability: "aggregate_only",
+    available: false,
+  },
+  {
+    id: "google_analytics",
+    display_name: "Google Analytics 4",
+    capability: "event_level",
+    available: false,
+  },
+];
+
+export const MOCK_IMPORT_RUNS: ImportRun[] = [];
+
+export const MOCK_EXPORTS: ExportRun[] = [];
