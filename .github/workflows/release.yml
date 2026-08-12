@@ -106,7 +106,13 @@ jobs:
           set -euo pipefail
           declared="$(node -p "require('./package.json').version")"
           tag="${{ steps.version.outputs.version }}"
-          if [ "v$declared" != "$tag" ]; then
+          # A pre-release is a candidate FOR a version, so `v0.2.0-rc.1` is
+          # checked against `0.2.0`: the tree already declares the version it is
+          # a candidate for, and bumping package.json for every candidate would
+          # be a commit per attempt saying nothing.
+          expected="${tag#v}"
+          expected="${expected%%-*}"
+          if [ "$declared" != "$expected" ]; then
             echo "::error::the tag is $tag but package.json says $declared." \
                  "Bump package.json in the release commit — see RELEASING.md." >&2
             exit 1

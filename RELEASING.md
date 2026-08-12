@@ -111,7 +111,10 @@ compose pull` that cannot find a manifest.
 
 **Pre-releases** are `vX.Y.Z-rc.N`. They publish the same eight images under the
 pre-release tag and deliberately do not move `latest`, so the way to test the
-pipeline is to use it rather than to reason about it.
+pipeline is to use it rather than to reason about it. A candidate is checked
+against the version it is a candidate for — `v0.2.0-rc.1` wants `0.2.0` in
+`package.json`, not `0.2.0-rc.1`, so a second attempt is a tag rather than
+another commit.
 
 ## The one thing that is not automated
 
