@@ -245,27 +245,37 @@ jobs:
 
           for attempt in $(seq 1 60); do
             if curl -fsS http://localhost:3000/login >/dev/null 2>&1; then
-              echo "answered after ${attempt} attempt(s)"
+              echo "the login page answered after ${attempt} attempt(s)"
               break
             fi
             sleep 2
           done
+          curl -fsS -o /dev/null http://localhost:3000/login
 
           echo "--- the entrypoint's own account of what it did ---"
           docker logs oa-web 2>&1 | head -20
 
-          page="$(curl -fsS http://localhost:3000/login)"
-          # The page is server-rendered from the same substituted bundle, so the
-          # origin has to be in what it serves. Both directions are asserted: the
-          # value present AND the placeholder absent. Only checking for the value
-          # would pass on an image that still carried both.
-          echo "$page" | grep -q 'api.runtime-check.example' \
-            || { echo "::error::the api origin is not in the served page"; exit 1; }
-          if echo "$page" | grep -q 'oa-runtime-url.invalid'; then
-            echo "::error::a build-time placeholder is being served to browsers"
+          # Nothing under the build output may still carry a placeholder. This is
+          # the same check the entrypoint makes before starting; asserted again
+          # from outside, because "it started" is only evidence that the
+          # entrypoint's own guard ran, not that it was right.
+          if docker exec oa-web sh -c 'grep -rl oa-runtime-url.invalid .next' 2>/dev/null; then
+            echo "::error::a build-time placeholder survived into the running image"
             exit 1
           fi
-          echo "the served page carries this deployment's origins and no placeholder"
+
+          # And the origin has to be in something the browser is actually served.
+          # It lives in the client bundle rather than in the login page's HTML —
+          # the page references chunks, the chunks hold the URL — so this finds a
+          # file that contains it and fetches that file over HTTP.
+          file="$(docker exec oa-web sh -c "grep -rl api.runtime-check.example .next/static | head -1")"
+          [ -n "$file" ] || { echo "::error::no static asset contains the api origin"; exit 1; }
+          url="/_next/${file#.next/}"
+          echo "checking ${url}"
+          curl -fsS "http://localhost:3000${url}" | grep -q 'api.runtime-check.example' \
+            || { echo "::error::${url} is served without the api origin in it"; exit 1; }
+
+          echo "the dashboard serves this deployment's origins, and no placeholder survives"
 
       # The other half of the contract: a missing origin must stop the container
       # rather than serve a dashboard that calls nowhere.
