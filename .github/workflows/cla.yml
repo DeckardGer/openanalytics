@@ -1,0 +1,62 @@
+# The CLA gate (ADR-0062 § e).
+#
+# `contributor-assistant/github-action` rather than the hosted cla-assistant.io,
+# for the reason most of this repository's choices go: it runs here, in this
+# repository's own Actions, and stores the signatures in a file in this
+# repository. Nothing about who may contribute depends on a third-party service
+# staying up, staying free, or keeping an OAuth grant on the organization.
+#
+# **What a contributor does:** open a pull request, and the bot comments asking
+# them to reply with one sentence. That is the whole ritual. There is no DCO
+# sign-off on top of it — with a CLA gate the sign-off asks the same person for
+# the same assurance twice.
+#
+# The signature file is public and holds only what GitHub already publishes: the
+# username, the account id, the comment that signed, and when. No email address
+# is recorded, which is deliberate — a public file of contributor emails is a
+# public file of contributor emails.
+name: CLA
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, synchronize, closed]
+
+# `pull_request_target` runs with a token that can write to this repository, so
+# the permissions are named rather than inherited. It never checks out the pull
+# request's code — the action only reads the event and writes the signature
+# file — which is what keeps that trigger safe here.
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check or record the signature
+        if: >-
+          (github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
+          github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: .github/cla-signatures.json
+          path-to-document: https://github.com/OpenLabs-so/openanalytics/blob/main/CLA.md
+          branch: main
+          allowlist: Uaghazade1,alizadarahul,dependabot[bot]
+          create-file-commit-message: 'chore(cla): start the signature file'
+          signed-commit-message: 'chore(cla): $contributorName signed in #$pullRequestNo'
+          custom-notsigned-prcomment: >-
+            Thanks for the pull request. Before it can be merged we need you to
+            sign the [Contributor License Agreement](https://github.com/OpenLabs-so/openanalytics/blob/main/CLA.md)
+            — once, ever, for every future contribution too.
+
+
+            Read it, then post exactly this as a comment on this pull request:
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-allsigned-prcomment: 'CLA signed. Thank you — on to the review.'

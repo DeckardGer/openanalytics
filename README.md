@@ -101,8 +101,9 @@ ever leaves the host. None is bundled (about 60 MB, and stale within a month);
 
 **Pull requests are merged here, with your name on the commit.** This
 repository used to receive periodic exports from a private monorepo, and a
-merged PR was flattened by the next one; that ended in August 2026. A CLA bot
-asks you to sign once, and there is no DCO sign-off on top of it.
+merged PR was flattened by the next one; that ended in August 2026. A bot asks
+you to sign the [CLA](CLA.md) once — it is not an assignment, you keep your
+copyright — and there is no DCO sign-off on top of it.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the ground rules CI enforces,
 and where to start.

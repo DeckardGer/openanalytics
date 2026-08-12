@@ -13,9 +13,15 @@ next one. That model has ended. The private repository still exists — it carri
 the hosted service's commercial half and our operational record — but the two
 are now independent, and neither is generated from the other.
 
-We sign contributions with a **CLA**, which the bot will ask you for on your
-first pull request. There is no DCO sign-off requirement; one provenance step is
-enough.
+We sign contributions with a **[CLA](CLA.md)**, which a bot asks you for on your
+first pull request — one comment, once, covering everything you contribute
+afterwards. There is no DCO sign-off on top of it; asking the same person for
+the same assurance twice is a ritual, not a safeguard.
+
+It is not an assignment: you keep the copyright in what you wrote and may use it
+anywhere else. What it grants is permission to ship your work under terms other
+than the AGPL, which is what lets the hosted service and the open project be one
+codebase. [CLA.md](CLA.md) says so in full, including why.
 
 [Discussions](https://github.com/OpenLabs-so/openanalytics/discussions) are for
 questions and for ideas you want to talk through first; issues are for something
