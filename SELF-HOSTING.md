@@ -75,14 +75,30 @@ further** — see [Losing a secret](#losing-a-secret).
 
 ### 3. Bring it up
 
+**On a 4 GB host, add swap first.** The eight images are built here rather than
+pulled, and TypeScript and Next both want more memory than a 4 GB box has spare
+while the stores are already running. Without it a build is killed part way
+through, and the symptom — a container that exits `137` with no error of its own
+— points nowhere near the cause.
+
+```sh
+fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survive a reboot
+```
+
+Swap is needed for the **build**, not to run the product: a 4 GB host serves an
+ordinary install comfortably once the images exist. Leaving it on costs a file
+and rescues you the next time you build.
+
 ```sh
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
 docker compose ps                  # everything but migrate/tracker-build healthy
 ```
 
-The first run builds seven images and takes a while. Order is enforced by the
-compose file and is not cosmetic:
+The first run builds eight images and takes a while — about ten minutes on a
+4 GB Hetzner box, most of it compiling. Order is enforced by the compose file
+and is not cosmetic:
 
 1. stores start and become healthy;
 2. `migrate` runs Postgres migrations, then ClickHouse migrations, and exits;
