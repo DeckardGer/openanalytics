@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
 import {
   AnalyticsCardBody,
+  breakdownShare,
   BreakdownRow,
   useSiteAnalytics,
 } from "@/components/dashboard/analytics-card";
@@ -170,7 +171,10 @@ export function LocationsCard() {
             view === "countries"
               ? foldCountries(data.items)
               : foldCities(data.items);
-          const max = Math.max(...places.map((place) => place.visitors), 1);
+          const share = breakdownShare(
+            places.map((place) => place.visitors),
+            data.meta.truncated
+          );
           return (
             <AnimatePresence initial={false} mode="wait">
               <motion.div
@@ -213,7 +217,7 @@ export function LocationsCard() {
                               ? countryName(place.country)
                               : place.label
                           }
-                          pct={Math.round((place.visitors / max) * 100)}
+                          pct={share(place.visitors)}
                           value={place.visitors.toLocaleString("en-US")}
                         />
                       ))}
@@ -261,10 +265,10 @@ function LocationsModal({
       : view === "countries"
         ? foldCountries(items)
         : foldCities(items);
-  const max =
-    places === null
-      ? 1
-      : Math.max(...places.map((place) => place.visitors), 1);
+  const share = breakdownShare(
+    places === null ? [] : places.map((place) => place.visitors),
+    meta?.truncated ?? false
+  );
 
   return (
     <SeeAllModal
@@ -299,7 +303,7 @@ function LocationsModal({
                     ? countryName(place.country)
                     : place.label
                 }
-                pct={Math.round((place.visitors / max) * 100)}
+                pct={share(place.visitors)}
                 value={place.visitors.toLocaleString("en-US")}
               />
             ))}

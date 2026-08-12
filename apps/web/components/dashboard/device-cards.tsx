@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
 import {
   AnalyticsCardBody,
+  breakdownShare,
   BreakdownRow,
   useSiteAnalytics,
 } from "@/components/dashboard/analytics-card";
@@ -120,9 +121,9 @@ export function DeviceCards() {
             // Folded on the raw device_type so the row still knows which
             // glyph it wears; the label prettifies at render.
             const devices = fold(data.items, (row) => row.device_type);
-            const total = devices.reduce(
-              (sum, device) => sum + device.visitors,
-              0
+            const share = breakdownShare(
+              devices.map((device) => device.visitors),
+              data.meta.truncated
             );
             return (
               <HoverList>
@@ -136,7 +137,7 @@ export function DeviceCards() {
                     }
                     key={device.label}
                     name={DEVICE_LABEL[device.label] ?? device.label}
-                    pct={Math.round((device.visitors / Math.max(total, 1)) * 100)}
+                    pct={share(device.visitors)}
                     value={device.visitors.toLocaleString("en-US")}
                   />
                 ))}
@@ -200,9 +201,9 @@ export function DeviceCards() {
               const value = techView === "browsers" ? row.browser : row.os;
               return value === "unknown" || value === "" ? "unknown" : value;
             });
-            const max = Math.max(
-              ...families.map((family) => family.visitors),
-              1
+            const share = breakdownShare(
+              families.map((family) => family.visitors),
+              data.meta.truncated
             );
             return (
               <AnimatePresence initial={false} mode="wait">
@@ -244,7 +245,7 @@ export function DeviceCards() {
                           }
                           key={family.label}
                           name={familyLabel(family.label)}
-                          pct={Math.round((family.visitors / max) * 100)}
+                          pct={share(family.visitors)}
                           value={family.visitors.toLocaleString("en-US")}
                         />
                       ))}
@@ -259,7 +260,11 @@ export function DeviceCards() {
 
       <AnimatePresence>
         {openDevices && (
-          <DevicesModal items={items} onClose={() => setOpenDevices(false)} />
+          <DevicesModal
+            items={items}
+            meta={meta}
+            onClose={() => setOpenDevices(false)}
+          />
         )}
       </AnimatePresence>
 
@@ -280,21 +285,21 @@ export function DeviceCards() {
 /** Every device class, in the vertical shell — a short list, same door. */
 function DevicesModal({
   items,
+  meta,
   onClose,
 }: {
   items: DeviceRow[] | null;
+  /** Read for `truncated` alone: a share of a capped row set is inflated. */
+  meta: AnalyticsMeta | null;
   onClose: () => void;
 }) {
   const intervalLabel = useIntervalLabel();
   const devices =
     items === null ? null : fold(items, (row) => row.device_type);
-  const total =
-    devices === null
-      ? 1
-      : Math.max(
-          devices.reduce((sum, device) => sum + device.visitors, 0),
-          1
-        );
+  const share = breakdownShare(
+    devices === null ? [] : devices.map((device) => device.visitors),
+    meta?.truncated ?? false
+  );
 
   return (
     <SeeAllModal
@@ -314,7 +319,7 @@ function DevicesModal({
               }
               key={device.label}
               name={DEVICE_LABEL[device.label] ?? device.label}
-              pct={Math.round((device.visitors / total) * 100)}
+              pct={share(device.visitors)}
               value={device.visitors.toLocaleString("en-US")}
             />
           ))}
@@ -345,10 +350,10 @@ function TechModal({
           const value = view === "browsers" ? row.browser : row.os;
           return value === "unknown" || value === "" ? "unknown" : value;
         });
-  const max =
-    families === null
-      ? 1
-      : Math.max(...families.map((family) => family.visitors), 1);
+  const share = breakdownShare(
+    families === null ? [] : families.map((family) => family.visitors),
+    meta?.truncated ?? false
+  );
 
   return (
     <SeeAllModal
@@ -380,7 +385,7 @@ function TechModal({
                 }
                 key={family.label}
                 name={familyLabel(family.label)}
-                pct={Math.round((family.visitors / max) * 100)}
+                pct={share(family.visitors)}
                 value={family.visitors.toLocaleString("en-US")}
               />
             ))}

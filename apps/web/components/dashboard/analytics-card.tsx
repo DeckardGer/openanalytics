@@ -161,6 +161,38 @@ export function AnalyticsCardBody<
   );
 }
 
+/**
+ * The share each row of a breakdown holds, for the `pct` a `BreakdownRow`
+ * prints.
+ *
+ * **The denominator is the sum of the rows, never the largest of them.** Scaling
+ * to the largest row makes the first row read `100%` on every card in the
+ * dashboard, which says "all of your traffic came from here" about a row that
+ * might hold a third of it. That would be a bar's scale, and these rows have no
+ * bar: `pct` is printed as a number, and a printed number has to be true on its
+ * own.
+ *
+ * **`undefined` when the gateway capped the row set.** Then the sum is a sum of
+ * what came back rather than of what exists, and every share computed from it is
+ * inflated by the rows that did not. No percentage is better than a confident
+ * wrong one, so the column simply does not appear.
+ *
+ * One limit that remains even when the number is shown, and is why these add up
+ * to *about* 100 rather than exactly: a visitor is counted distinctly within a
+ * row, not across rows, so somebody who arrived from two countries in the range
+ * is in both. The alternative is a denominator that disagrees with the column
+ * above it, which is worse.
+ */
+export function breakdownShare(
+  visitors: readonly number[],
+  truncated: boolean
+): (value: number) => number | undefined {
+  if (truncated) return () => undefined;
+  const total = visitors.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return () => undefined;
+  return (value: number) => Math.round((value / total) * 100);
+}
+
 /** Shared row for simple name/value breakdowns (moved off the mock page). */
 export function BreakdownRow({
   name,

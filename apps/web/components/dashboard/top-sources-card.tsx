@@ -11,6 +11,7 @@ import * as React from "react";
 import { Favicon } from "@/components/dashboard/site-favicon";
 import {
   AnalyticsCardBody,
+  breakdownShare,
   BreakdownRow,
   useSiteAnalytics,
 } from "@/components/dashboard/analytics-card";
@@ -28,7 +29,11 @@ import {
   SquircleCard,
   SquircleCardScroll,
 } from "@/components/ui/squircle-card";
-import { getAnalyticsSources, type SourceRow } from "@/lib/api";
+import {
+  getAnalyticsSources,
+  type AnalyticsMeta,
+  type SourceRow,
+} from "@/lib/api";
 import { MOCK_SOURCES } from "@/lib/mock";
 import { resolveReferrer } from "@/lib/referrers";
 
@@ -201,7 +206,10 @@ export function TopSourcesCard() {
             view === "referrers"
               ? foldReferrers(data.items)
               : foldUtm(data.items, view);
-          const max = Math.max(...rows.map((row) => row.visitors), 1);
+          const share = breakdownShare(
+            rows.map((row) => row.visitors),
+            data.meta.truncated
+          );
           return (
             <AnimatePresence initial={false} mode="wait">
               <motion.div
@@ -224,7 +232,7 @@ export function TopSourcesCard() {
                           icon={sourceMark(row)}
                           key={row.label}
                           name={row.label}
-                          pct={Math.round((row.visitors / max) * 100)}
+                          pct={share(row.visitors)}
                           value={row.visitors.toLocaleString("en-US")}
                         />
                       ))}
@@ -242,6 +250,7 @@ export function TopSourcesCard() {
       {open && (
         <SourcesModal
           items={resource.status === "ready" ? resource.data.items : null}
+          meta={resource.status === "ready" ? resource.data.meta : null}
           view={view}
           onClose={() => setOpen(false)}
         />
@@ -254,10 +263,13 @@ export function TopSourcesCard() {
 /** The whole ranking of the cut the card is on, in the vertical shell. */
 function SourcesModal({
   items,
+  meta,
   view,
   onClose,
 }: {
   items: SourceRow[] | null;
+  /** Read for `truncated` alone: a share of a capped row set is inflated. */
+  meta: AnalyticsMeta | null;
   view: SourceView;
   onClose: () => void;
 }) {
@@ -269,8 +281,10 @@ function SourcesModal({
       : view === "referrers"
         ? foldReferrers(items)
         : foldUtm(items, view);
-  const max =
-    rows === null ? 1 : Math.max(...rows.map((row) => row.visitors), 1);
+  const share = breakdownShare(
+    rows === null ? [] : rows.map((row) => row.visitors),
+    meta?.truncated ?? false
+  );
 
   return (
     <SeeAllModal
@@ -292,7 +306,7 @@ function SourcesModal({
               icon={sourceMark(row)}
               key={row.label}
               name={row.label}
-              pct={Math.round((row.visitors / max) * 100)}
+              pct={share(row.visitors)}
               value={row.visitors.toLocaleString("en-US")}
             />
           ))}

@@ -522,7 +522,8 @@ export function LoginForm({
                         <span className="font-medium text-foreground">
                           {email.trim()}
                         </span>
-                        . It expires in 15 minutes.
+                        . It expires in 15 minutes. If it is not there, check
+                        your spam folder.
                       </p>
                     </div>
                     <div className="flex flex-col gap-2">
