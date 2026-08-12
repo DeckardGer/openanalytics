@@ -39,6 +39,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# A snapshot contains every secret this deployment has, so nothing it writes is
+# readable by anyone else on the host. Set here rather than per-file: the
+# copies of `env/*.env` would otherwise arrive at whatever the caller's umask
+# happens to be.
+umask 077
+
 BACKUP_ROOT="${OA_BACKUP_DIR:-backups}"
 # Only needs `tar`, `gzip`, `du` and `rm`. Pinned like every other image here:
 # a floating tag would make a restore depend on when it ran.
@@ -119,13 +125,23 @@ volume_bytes() {
 archive_volume() {
 	local volume="$1" out_dir="$2" name="$3"
 	# `-C /src .` so the archive is relative and extracts into any directory.
-	# Owner and group are preserved as numbers: a Postgres data directory owned
-	# by the wrong uid is a store that will not start.
+	# Owner and group are preserved inside it: a Postgres data directory owned by
+	# the wrong uid is a store that will not start.
+	#
+	# The container has to run as root to READ a store's data directory, so the
+	# archive it writes lands owned by root — and then the caller, who may not be
+	# root, cannot chmod its own backup. Measured in CI: `chmod: changing
+	# permissions of 'pg-data.tar.gz': Operation not permitted`, with the stack
+	# already stopped. So the last thing the container does is hand the file
+	# over. When docker is being driven by root anyway this is a no-op.
 	docker run --rm \
 		-v "$volume:/src:ro" \
 		-v "$out_dir:/out" \
 		"$HELPER_IMAGE" \
-		tar czf "/out/$name" -C /src .
+		sh -c "set -e
+			tar czf '/out/$name' -C /src .
+			chown $(id -u):$(id -g) '/out/$name'
+			chmod 600 '/out/$name'"
 }
 
 restore_volume() {
