@@ -14,7 +14,8 @@ labels: bug
 **Environment**
 
 - Self-hosted or getopen.so:
-- Commit / export version (`git log -1 --oneline`):
+- Tag or commit (`git describe --tags --always`):
+- Docker Compose, or from source:
 - Node version, browser (for tracker/dashboard issues):
 
 **Logs / screenshots**

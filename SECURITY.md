@@ -25,5 +25,11 @@ release notes unless you prefer otherwise.
 
 ## Supported versions
 
-The tip of `main` (the latest export). There are no maintained release
-branches; fixes ship forward.
+The tip of `main`. There are no maintained release branches; fixes ship
+forward, so the remedy for a vulnerability is always to move forward rather
+than to wait for a backport.
+
+A fix that matters to self-hosters lands here promptly whether it was found
+here or against the hosted service — the two are developed separately now, and
+security fixes are the one thing that crosses in both directions without
+waiting for anything else.

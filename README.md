@@ -99,12 +99,17 @@ ever leaves the host. None is bundled (about 60 MB, and stale within a month);
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), including the one unusual rule:
-development happens in an internal repository, and this one receives verified
-exports. Your pull request is reviewed here, applied internally with credit, and
-lands with the next export.
+**Pull requests are merged here, with your name on the commit.** This
+repository used to receive periodic exports from a private monorepo, and a
+merged PR was flattened by the next one; that ended in August 2026. A CLA bot
+asks you to sign once, and there is no DCO sign-off on top of it.
 
-Security reports: [SECURITY.md](SECURITY.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the ground rules CI enforces,
+and where to start.
+[Discussions](https://github.com/OpenLabs-so/openanalytics/discussions) are for
+questions and for ideas worth talking through first.
+
+Security reports: [SECURITY.md](SECURITY.md) — please not a public issue.
 
 ## License and trademark
 

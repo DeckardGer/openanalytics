@@ -1,0 +1,17 @@
+# Blank issues are off, and the two links below are why: the things people most
+# often open an issue for — a question, and a vulnerability — both have a better
+# home, and neither is well served by a thread in a public tracker.
+blank_issues_enabled: false
+contact_links:
+  - name: Question, or an idea you want to talk through first
+    url: https://github.com/OpenLabs-so/openanalytics/discussions
+    about: >-
+      "How do I…", "should this…", "would you take a PR that…". Discussions,
+      not issues — an issue is for something that is wrong or missing, and a
+      question closed as "answered" reads as a bug that was dismissed.
+  - name: Security vulnerability
+    url: https://github.com/OpenLabs-so/openanalytics/security/policy
+    about: >-
+      Report it privately. A public issue for a vulnerability is a disclosure,
+      and it is a disclosure to everybody running this software before there is
+      a fix for them to take.
