@@ -282,19 +282,36 @@ To put the queue on a wire you do not control, terminate TLS in Valkey and use
 
 ### GeoIP
 
-Country and city come from a local City-schema `.mmdb` — MaxMind GeoLite2 or the
-DB-IP equivalent. Neither may be redistributed, so neither is committed here.
+Country and city come from a local City-schema `.mmdb`. Without one every event
+carries null geo, which is why a fresh install shows every country as unknown
+and an empty globe.
 
 ```sh
-# put GeoLite2-City.mmdb (or dbip-city-lite.mmdb) in:
-infra/selfhost/geoip/
+cd infra/selfhost/geoip && ./fetch-dbip.sh
 # then in env/collector.env:
-GEOIP_DB_PATH=/geoip/GeoLite2-City.mmdb
+GEOIP_DB_PATH=/geoip/dbip-city-lite.mmdb
+docker compose up -d --force-recreate collector
 ```
 
-Refresh it periodically — the databases go stale — and recreate the collector
-afterwards. Unset, every event carries null geo. City-level detail is opt-in per
-site in the dashboard regardless.
+**DB-IP City Lite is CC BY 4.0** — no account, direct download, and
+redistributable with attribution, which is the whole reason a script can fetch
+it for you. The attribution is a licence condition rather than a courtesy: keep
+**IP Geolocation by DB-IP (https://db-ip.com)** wherever the data is shown. It
+is in this repository's README for the same reason.
+
+MaxMind's GeoLite2-City.mmdb works equally well if you already have one — the
+schemas are interchangeable, so drop it in the same directory and point
+`GEOIP_DB_PATH` at it. Nothing here fetches it: it needs a MaxMind account and
+its EULA forbids redistribution.
+
+**Re-run the fetch monthly, and recreate the collector afterwards.** The
+database goes stale, and the collector opens it once at boot — a new file on
+disk changes nothing until the process restarts.
+
+The database is never committed: about 60 MB, out of date within a month, and a
+database in git history is in git history forever.
+
+City-level detail stays opt-in per site in the dashboard regardless of this.
 
 ### Putting your own proxy in front
 

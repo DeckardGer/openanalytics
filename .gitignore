@@ -16,9 +16,12 @@ apps/tracker/bundle/
 infra/selfhost/env/*.env
 !infra/selfhost/env/*.env.example
 infra/selfhost/docker-compose.override.yml
-# A licensed GeoIP database, which may not be redistributed.
+# The GeoIP database itself is never committed: ~60 MB, stale within a month,
+# and MaxMind's may not be redistributed at all. The fetcher and the note that
+# explains the directory are.
 infra/selfhost/geoip/*
 !infra/selfhost/geoip/.gitkeep
+!infra/selfhost/geoip/fetch-dbip.sh
 
 .DS_Store
 Thumbs.db

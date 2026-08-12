@@ -88,8 +88,14 @@ pnpm run verify        # everything CI checks, including boundaries and the size
 No cookies, no fingerprinting, no cross-site identifiers. Visitor identity is a
 daily-rotating salted hash; raw IP addresses are never stored. Do Not Track and
 Global Privacy Control are honored at the collector, before anything is written.
-City-level geolocation is opt-in per site, and the GeoIP database is yours to
-supply — none is bundled.
+City-level geolocation is opt-in per site.
+
+Geolocation is resolved locally against a database on your own disk — no lookup
+ever leaves the host. None is bundled (about 60 MB, and stale within a month);
+`infra/selfhost/geoip/fetch-dbip.sh` downloads one.
+
+> IP Geolocation by DB-IP — [https://db-ip.com](https://db-ip.com) — used under
+> [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ## Contributing
 

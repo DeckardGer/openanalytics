@@ -1,7 +1,15 @@
-Put a City-schema GeoIP database here (MaxMind GeoLite2-City.mmdb or the DB-IP
-equivalent) and uncomment GEOIP_DB_PATH in env/collector.env.
+The collector reads a City-schema GeoIP database from here. The compose file
+mounts this directory into it read-only.
 
-The compose file mounts this directory into the collector read-only. It is
-empty on purpose: neither database may be redistributed, so neither can be
-committed. Without one, every event carries null geo — a degradation, never a
-failure.
+Run `./fetch-dbip.sh` to download one. It fetches DB-IP City Lite, which is
+CC BY 4.0 — no account, direct download, redistributable with attribution — and
+prints the attribution line the licence requires. `generate-secrets.sh
+--with-geoip` runs it for you and fills in GEOIP_DB_PATH.
+
+MaxMind's GeoLite2-City.mmdb works equally well if you already have one: the
+schemas are interchangeable. Drop it here and point GEOIP_DB_PATH at it. It
+needs a MaxMind account and its licence forbids redistribution, which is why
+nothing here fetches it.
+
+No database is committed. Without one, every event carries null geo — a
+degradation, never a failure.
