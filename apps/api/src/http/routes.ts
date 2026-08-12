@@ -495,7 +495,7 @@ export function createBusinessRoutes(deps: RoutesDeps): Hono<Env> {
   // `DELETE /v1/me` (ADR-0030, decision 8). Its own module and its own mount:
   // the preference handlers above and the erasure of an account are the same
   // subject addressed by the same session, and nothing else.
-  authed.route('/', createMeDeletionRoutes({ db }))
+  authed.route('/', createMeDeletionRoutes({ db, env }))
 
   /**
    * What the operator configures from the dashboard rather than from a file on

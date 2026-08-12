@@ -297,6 +297,23 @@ export interface paths {
          *     reasons applies. A site that is already `deleting` or `deleted` never
          *     blocks.
          *
+         *     **A third hold exists only on a self-hosted deployment.** Where
+         *     `DEPLOYMENT_SETTINGS` is enabled, the account that administers the
+         *     deployment — the oldest one, which is what the deployment settings
+         *     surface authorizes against — cannot delete itself: the role is derived
+         *     rather than granted, so removing that account would silently move the
+         *     stored SMTP password and model-provider key to whoever is next-oldest.
+         *     The refusal is `409 ACCOUNT_DELETION_BLOCKED` carrying
+         *     `details.reason: 'deployment_operator'` and **no** `blocking_sites`, and
+         *     the remedy is to clear the stored settings first
+         *     (`DELETE /v1/deployment/settings/{scope}`), which returns the deployment
+         *     to its environment. It is checked ahead of the re-authentication and the
+         *     confirmation, because proving intent does not change the answer.
+         *
+         *     This hold does not exist where `DEPLOYMENT_SETTINGS` is disabled. There
+         *     the oldest account is only the first that signed up, nothing is stored
+         *     against it, and its erasure is unaffected.
+         *
          *     The answer is `202`, never `200`: the erasure is a background state
          *     machine. It waits for those site deletions to finish, cancels the Stripe
          *     subscription (verified against Stripe, not assumed), then removes
@@ -8657,9 +8674,16 @@ export interface operations {
             /**
              * @description Either sites still depend on this account
              *     (`ACCOUNT_DELETION_BLOCKED`, carrying `details.blocking_sites` — an
-             *     array of `AccountDeletionBlockingSite`), or the supplied
-             *     `Idempotency-Key` was already used with a different payload or is
-             *     still in flight (`IDEMPOTENCY_CONFLICT`).
+             *     array of `AccountDeletionBlockingSite`); or, on a self-hosted
+             *     deployment, the account administers the deployment itself
+             *     (`ACCOUNT_DELETION_BLOCKED`, carrying
+             *     `details.reason: 'deployment_operator'` and no `blocking_sites`); or
+             *     the supplied `Idempotency-Key` was already used with a different
+             *     payload or is still in flight (`IDEMPOTENCY_CONFLICT`).
+             *
+             *     The two `ACCOUNT_DELETION_BLOCKED` shapes are told apart by which
+             *     detail is present, so a client that only understands
+             *     `blocking_sites` renders the message and is not wrong about it.
              */
             409: {
                 headers: {

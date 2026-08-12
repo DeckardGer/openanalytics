@@ -38,6 +38,9 @@ const world = {
   blocked: null as
     { siteId: string; slug: string; reason: 'billing_owner' | 'sole_owner' }[] | null,
   started: true,
+  /** Who `deploymentOperatorUserId` reports. `null` is a deployment with nobody
+   * in it, and is the default so every test above is unaffected by the guard. */
+  operator: null as string | null,
 }
 
 vi.mock('@openanalytics/postgres', async (importOriginal) => {
@@ -51,6 +54,7 @@ vi.mock('@openanalytics/postgres', async (importOriginal) => {
       }
       return { deletionRequestId: REQUEST_ID, jobId: 'job-1', started: world.started }
     },
+    deploymentOperatorUserId: async () => world.operator,
   }
 })
 
@@ -79,16 +83,39 @@ const auth = {
 } as unknown as Auth
 
 const { logger } = createCapturedLogger()
-const app = createApp({
-  service: createServiceMetadata({ name: 'api', version: '0.0.0-test', environment: 'test' }),
-  logger,
-  env: loadServiceEnv('api', testEnv()),
-  auth,
-  db: {} as Database,
-})
 
-const del = (user: string | null, body: unknown, sessionAgeSeconds = 0) =>
-  app.fetch(
+function buildApp(overrides: Record<string, string> = {}) {
+  return createApp({
+    service: createServiceMetadata({ name: 'api', version: '0.0.0-test', environment: 'test' }),
+    logger,
+    env: loadServiceEnv('api', testEnv(overrides)),
+    auth,
+    db: {} as Database,
+  })
+}
+
+/**
+ * A self-hosted deployment: `DEPLOYMENT_SETTINGS` defaults to `enabled`, which
+ * is what a fresh install gets and therefore what every test here runs against.
+ */
+const app = buildApp()
+
+/**
+ * A multi-tenant deployment, which sets the flag `disabled`.
+ *
+ * A second instance rather than a mutable env, because the guard reads the
+ * parsed environment at construction and the whole point of the pair is that one
+ * deployment shape must behave exactly as it did before this guard existed.
+ */
+const hostedApp = buildApp({ DEPLOYMENT_SETTINGS: 'disabled' })
+
+const delOn = (
+  target: ReturnType<typeof buildApp>,
+  user: string | null,
+  body: unknown,
+  sessionAgeSeconds = 0,
+) =>
+  target.fetch(
     new Request('http://api.test/v1/me', {
       method: 'DELETE',
       headers: {
@@ -100,6 +127,9 @@ const del = (user: string | null, body: unknown, sessionAgeSeconds = 0) =>
     }),
   )
 
+const del = (user: string | null, body: unknown, sessionAgeSeconds = 0) =>
+  delOn(app, user, body, sessionAgeSeconds)
+
 const errorCode = async (res: Response): Promise<string> =>
   ((await res.json()) as { error: { code: string } }).error.code
 
@@ -107,6 +137,7 @@ beforeEach(() => {
   calls.startAccountDeletion = []
   world.blocked = null
   world.started = true
+  world.operator = null
 })
 
 describe('DELETE /v1/me', () => {
@@ -185,5 +216,84 @@ describe('DELETE /v1/me', () => {
     const res = await del(USER, { confirm: EMAIL })
     expect(res.status).toBe(202)
     expect(await res.json()).toEqual({ deletion_request_id: REQUEST_ID })
+  })
+})
+
+/**
+ * The deployment operator, and the deployment shape the refusal must not reach.
+ *
+ * Since migration 0043 a self-hosted deployment keeps its SMTP password and its
+ * model-provider key in `deployment_settings`, and the account authorized to
+ * read and rewrite them is *derived* — the oldest one. Nothing grants or moves
+ * that role, so deleting the oldest account promotes the next-oldest silently:
+ * possibly a viewer on one site, who never agreed to hold a relay credential.
+ *
+ * Both directions are pinned here because getting either wrong is invisible.
+ * A missing guard hands the deployment's credentials to a stranger; a guard that
+ * fires where the role does not exist denies a paying customer the erasure
+ * ADR-0057 committed to — which is the worse of the two, and the reason the flag
+ * is checked before the identity is even looked up.
+ */
+describe('DELETE /v1/me — the deployment operator', () => {
+  it('refuses the operator on a self-hosted deployment, before any write', async () => {
+    world.operator = USER
+
+    const res = await del(USER, { confirm: EMAIL })
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as {
+      error: { code: string; message: string; details: Record<string, unknown> }
+    }
+    expect(body.error.code).toBe('ACCOUNT_DELETION_BLOCKED')
+    // The distinguishing detail, and the absence of the other one: a client that
+    // only understands `blocking_sites` reads no sites and falls through to the
+    // message rather than rendering an empty "these sites are blocking" list.
+    expect(body.error.details['reason']).toBe('deployment_operator')
+    expect(body.error.details['blocking_sites']).toBeUndefined()
+    // The remedy has to be in the refusal; "you cannot" with no next step is
+    // where an operator gives up and edits the database by hand.
+    expect(body.error.message).toContain('settings')
+    expect(calls.startAccountDeletion).toEqual([])
+  })
+
+  it('refuses the operator even with a fresh session and the exact email', async () => {
+    // The two guards below it prove *intent*, and no amount of proven intent
+    // changes this answer — so it is checked ahead of both rather than being a
+    // refusal somebody can reach by confirming harder.
+    world.operator = USER
+    expect((await del(USER, { confirm: EMAIL }, 0)).status).toBe(409)
+    expect(calls.startAccountDeletion).toEqual([])
+  })
+
+  it('lets every other account delete itself on the same deployment', async () => {
+    // The guard is about one identity, not about the feature being on.
+    world.operator = OTHER
+
+    const res = await del(USER, { confirm: EMAIL })
+    expect(res.status).toBe(202)
+    expect(calls.startAccountDeletion).toEqual([{ userId: USER }])
+  })
+
+  it('does not fire on a deployment configured from its environment', async () => {
+    // `DEPLOYMENT_SETTINGS=disabled` is the multi-tenant shape. The same account
+    // that is refused above — oldest, and the operator by the same derivation —
+    // is erased here, because there is nothing stored against it and no role to
+    // inherit. A guard that fired here would be a defect, not a safety measure.
+    world.operator = USER
+
+    const res = await delOn(hostedApp, USER, { confirm: EMAIL })
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ deletion_request_id: REQUEST_ID })
+    expect(calls.startAccountDeletion).toEqual([{ userId: USER }])
+  })
+
+  it('still refuses a stale session on a deployment where the guard is off', async () => {
+    // The control for the test above: `disabled` removes exactly one refusal and
+    // leaves the rest of the chain where it was.
+    world.operator = USER
+
+    const res = await delOn(hostedApp, USER, { confirm: EMAIL }, 3_600)
+    expect(res.status).toBe(403)
+    expect(await errorCode(res)).toBe('REAUTH_REQUIRED')
+    expect(calls.startAccountDeletion).toEqual([])
   })
 })

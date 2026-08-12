@@ -1,7 +1,8 @@
 import { ApiError } from '@openanalytics/contracts'
-import { isRecentReauth } from '@openanalytics/domain'
+import { isRecentReauth, type ServiceEnv } from '@openanalytics/domain'
 import {
   AccountDeletionBlockedError,
+  deploymentOperatorUserId,
   startAccountDeletion,
   type Database,
 } from '@openanalytics/postgres'
@@ -36,6 +37,7 @@ import type { ApiVariables } from './middleware.ts'
  *   starting a second deletion. The repository is idempotent as well (it returns
  *   the live request for an account already being deleted), so the two agree
  *   rather than one covering for the other.
+ * - **the deployment operator, and only where that role exists** — see below.
  *
  * The answer is `202`. Deletion is a state machine that waits for site deletions
  * and for Stripe to confirm a cancellation; there is no synchronous "done".
@@ -45,21 +47,82 @@ import type { ApiVariables } from './middleware.ts'
  * that asked could not read its own 202 — and it would put a second writer on a
  * table the teardown already owns, for a window whose only occupant is the
  * person who just asked to be erased.
+ *
+ * ## The operator refusal, and why it is scoped to one kind of deployment
+ *
+ * Since migration 0043 a self-hosted deployment keeps its SMTP password and its
+ * model-provider key in `deployment_settings`, and the account allowed to read
+ * and rewrite them is *derived*: `deploymentOperatorUserId` is the oldest
+ * account, because there is no role above a site to ask. Nothing anywhere grants
+ * or moves that role — so deleting the oldest account does not remove the
+ * operator, it **silently promotes the next-oldest one**, who may be a viewer on
+ * a single site and who never agreed to hold a relay credential. The transfer is
+ * invisible from both ends: no confirmation, no audit entry, no screen that
+ * changes until somebody opens the settings tab and finds it editable.
+ *
+ * So the operator cannot delete their own account, and the remedy is the one
+ * this product already has for the same shape of problem — hand the thing over
+ * first. Here that means clearing the stored settings, which returns the
+ * deployment to its environment and makes the derived role worth nothing.
+ *
+ * **The guard fires only when `DEPLOYMENT_SETTINGS` is enabled, and that
+ * restriction is the more important half.** A multi-tenant deployment sets it
+ * `disabled`: there are no stored settings, no operator concept, and the oldest
+ * account is nothing but the first customer who ever signed up. Refusing *their*
+ * deletion would deny a real person the erasure ADR-0057 committed to giving
+ * them, over a role that does not exist in that deployment. A safety measure
+ * that fires in the hosted product is a defect, not a safety measure, so the
+ * condition is checked before the identity is even looked up.
+ *
+ * It is checked first, ahead of the re-authentication and the confirmation.
+ * Those two exist to prove intent, and no amount of proven intent changes this
+ * answer — making somebody re-authenticate and type their own address in order
+ * to be told "not while you hold this" is a worse answer than telling them
+ * straight away.
  */
 
 export interface MeDeletionRoutesDeps {
   readonly db: Database
+  /**
+   * Read for `DEPLOYMENT_SETTINGS` alone. Present rather than a bare boolean so
+   * this module reads the same variable the settings surface and the worker's
+   * mail drain read, from the same parsed environment — a second spelling of
+   * "is this deployment self-hosted" is how the three drift apart.
+   */
+  readonly env: ServiceEnv<'api'>
 }
 
 type Env = { Variables: ApiVariables }
 
 export function createMeDeletionRoutes(deps: MeDeletionRoutesDeps): Hono<Env> {
-  const { db } = deps
+  const { db, env } = deps
   const app = new Hono<Env>()
 
   app.delete('/me', idempotent({ db, scope: 'me.delete' }), async (c) => {
     const user = c.get('user')
     const session = c.get('session')
+
+    // The flag first, and the identity only if it is set: on a deployment that
+    // configures itself from its environment there is no operator to be, and the
+    // query that would ask is one this request has no business making.
+    if (env.DEPLOYMENT_SETTINGS === 'enabled') {
+      const operator = await deploymentOperatorUserId(db)
+      if (operator !== null && operator === user.id) {
+        throw new ApiError(
+          'ACCOUNT_DELETION_BLOCKED',
+          'This account administers the deployment. Clear its stored mail and assistant settings first, so the deployment falls back to its environment.',
+          {
+            // The same code the site holds use, because it is the same statement
+            // — something depends on this account and must be dealt with first —
+            // and the frontend already routes 409s here to a "deal with this
+            // first" screen. `blocking_sites` is deliberately absent rather than
+            // empty: no site is blocking, and `accountDeletionBlockers()` reads
+            // its absence as "nothing to list" and falls through to the message.
+            details: { reason: 'deployment_operator' },
+          },
+        )
+      }
+    }
 
     if (!isRecentReauth(session.createdAt, new Date())) {
       throw new ApiError('REAUTH_REQUIRED', 'Recent re-authentication required')
