@@ -34,6 +34,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24.18.0'
+          # Off, and load-bearing: the default is `true`, which reads
+          # `packageManager` from package.json and then shells out to pnpm to
+          # find its store. This job installs nothing, so pnpm is not on the
+          # PATH and setup-node fails before the scan ever runs.
+          package-manager-cache: false
 
       # A finding prints the file and a truncated sample, never the value.
       - name: Scan the tracked tree for credential shapes
