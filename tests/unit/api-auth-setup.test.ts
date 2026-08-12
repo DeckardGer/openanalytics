@@ -67,12 +67,16 @@ function stubAuth(record: Recorded, options: { signUpThrows?: boolean } = {}) {
 
 const oneUser = usersReturning([{ one: 1 }])
 
+/** The most recent app's log lines, so a test can assert what was written. */
+let captured = createCapturedLogger()
+
 function buildApp(
   users: Database,
   record: Recorded,
   options: { signUpThrows?: boolean; overrides?: Record<string, string> } = {},
 ) {
-  const { logger } = createCapturedLogger()
+  captured = createCapturedLogger()
+  const { logger } = captured
   return createApp({
     service: createServiceMetadata({ name: 'api', version: '0.0.0-test', environment: 'test' }),
     logger,
@@ -162,6 +166,39 @@ describe('POST /v1/auth/setup', () => {
 
     expect(res.status).toBe(409)
     expect(record.signIns).toEqual([])
+  })
+
+  /**
+   * The claim is announced loudly and identifies nobody.
+   *
+   * Claiming a deployment is worth a `warn` — it is the one unauthenticated
+   * write on this api. What it must not do is write down who claimed it: this
+   * repository's rule is that a raw address, postal or network, never reaches a
+   * log line. `apps/api/src/http/routes.ts` says an invitee's email "never
+   * reaches the audit trail or a log", and `credential-source.ts` HMACs client
+   * addresses rather than recording them.
+   *
+   * Asserted over the whole serialized line rather than field by field, because
+   * the failure this guards against is a field somebody adds later.
+   */
+  it('announces the claim without writing down who made it', async () => {
+    const record = fresh()
+    const app = buildApp(unclaimed(record), record)
+    await post(app, GOOD)
+
+    const lines = captured.find('setup_first_account_created')
+    expect(lines).toHaveLength(1)
+    const line = lines[0] as Record<string, unknown>
+    expect(line['level']).toBe('warn')
+
+    const serialized = JSON.stringify(line)
+    // The address that claimed it, and the address it came from.
+    expect(serialized).not.toContain(GOOD.email)
+    expect(serialized).not.toContain('owner@')
+    expect(line['address']).toBeUndefined()
+    // The domain is what the log transport already records for every message it
+    // handles, and it is enough to recognise the claim.
+    expect(line['email_domain']).toBe('example.test')
   })
 
   it('rate-limits the address that is spraying it', async () => {

@@ -232,9 +232,18 @@ export function createAuthProviderRoutes(deps: AuthProviderDeps): Hono<Env> {
     // ordinary way.
     await markVerified(email)
 
+    // Loud, and deliberately not identifying. Claiming a deployment is worth a
+    // `warn`, but this repository's rule is that a raw address — postal or
+    // network — never reaches a log line: `routes.ts` says an invitee's email
+    // "never reaches the audit trail or a log", and `credential-source.ts` HMACs
+    // client addresses rather than writing them down. Both applied here.
+    //
+    // The recipient *domain* is what the log transport already records for every
+    // message it handles, and it is enough to recognise the claim. Who actually
+    // holds the account is a `SELECT` away in `users`, which is where an
+    // identity belongs.
     deps.logger.warn('setup_first_account_created', {
-      email,
-      address: clientAddress(c.req.raw),
+      email_domain: email.slice(email.lastIndexOf('@') + 1),
       detail: 'the first account was created through the unauthenticated setup route',
     })
 
