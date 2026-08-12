@@ -332,3 +332,145 @@ jobs:
           TEST_CLICKHOUSE_USER: openanalytics
           TEST_CLICKHOUSE_PASSWORD: openanalytics
         run: pnpm run test:migration
+
+  # The rollback path, run rather than reasoned about.
+  #
+  # There are no down migrations here, by decision, so going back a version is a
+  # restore of the snapshot the upgrade took. That makes `snapshot.sh` the only
+  # thing standing between an operator and an unrecoverable upgrade — and it is
+  # shell that stops databases, empties volumes and refills them from a tarball.
+  # Every one of those steps has a plausible-looking wrong version: an archive
+  # that loses file ownership, an extract that leaves the old contents in place, a
+  # volume name resolved by a guess that was right on the author's machine.
+  #
+  # So this job writes a row into each store, snapshots, destroys the row,
+  # restores, and reads the row back. It uses the real compose file, the real
+  # generator and the real scripts. No application image is built: the two stores
+  # and the helper image are all that is needed to prove the mechanism, and
+  # building eight images to insert one row would put this job out of reach of
+  # every pull request.
+  selfhost:
+    name: Snapshot and restore
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/selfhost
+    steps:
+      - uses: actions/checkout@v5
+
+      # The generator's own happy path, incidentally: twelve env files, the four
+      # names, and the three key pairs, from one run.
+      - name: Generate a configuration
+        run: ./generate-secrets.sh --domain selfhost.test --email ci@selfhost.test
+
+      # Not the point of this job, but free here and it is the assertion that
+      # would otherwise wait until somebody ran a release install: with the
+      # registry variables set, every one of our images resolves to a GHCR path.
+      - name: The compose file resolves to the published images
+        env:
+          OA_IMAGE_REPO: ghcr.io/openlabs-so/openanalytics
+          OA_IMAGE_TAG: v9.9.9-check
+        run: |
+          set -euo pipefail
+          images="$(docker compose config --images | grep '^ghcr.io/openlabs-so/openanalytics/' | sort -u)"
+          echo "$images"
+          count="$(echo "$images" | wc -l)"
+          [ "$count" -eq 8 ] || { echo "::error::expected 8 published images, resolved $count"; exit 1; }
+          echo "$images" | grep -qx 'ghcr.io/openlabs-so/openanalytics/api:v9.9.9-check'
+
+      - name: Start the two stores
+        run: |
+          set -euo pipefail
+          docker compose up -d postgres clickhouse
+          for attempt in $(seq 1 60); do
+            pg="$(docker inspect -f '{{.State.Health.Status}}' oa-postgres)"
+            ch="$(docker inspect -f '{{.State.Health.Status}}' oa-clickhouse)"
+            echo "postgres=$pg clickhouse=$ch"
+            [ "$pg" = healthy ] && [ "$ch" = healthy ] && exit 0
+            sleep 3
+          done
+          docker compose logs postgres clickhouse
+          exit 1
+
+      - name: Write a row into each store
+        run: |
+          set -euo pipefail
+          docker compose exec -T postgres \
+            psql -v ON_ERROR_STOP=1 -U openanalytics -d openanalytics \
+            -c "CREATE TABLE snapshot_marker (note text); INSERT INTO snapshot_marker VALUES ('survives a restore');"
+          docker compose exec -T clickhouse clickhouse-client --query \
+            "CREATE TABLE default.snapshot_marker (note String) ENGINE = MergeTree ORDER BY note"
+          docker compose exec -T clickhouse clickhouse-client --query \
+            "INSERT INTO default.snapshot_marker VALUES ('survives a restore')"
+
+      # --no-start, then start the two by hand: `snapshot.sh` would otherwise
+      # bring the whole stack up, which here means building eight images.
+      - name: Take a snapshot
+        run: |
+          set -euo pipefail
+          ./snapshot.sh create --label ci --no-start
+          ./snapshot.sh list
+          snapshot="$(ls -d backups/*-ci | tail -1)"
+          echo "snapshot=$snapshot" >> "$GITHUB_ENV"
+          # A snapshot that does not carry the configuration cannot be restored
+          # onto a fresh host, and the manifest is what rollback.sh reads.
+          test -s "$snapshot/pg-data.tar.gz"
+          test -s "$snapshot/ch-data.tar.gz"
+          test -s "$snapshot/manifest"
+          test -s "$snapshot/env/api.env"
+          test -s "$snapshot/docker-compose.override.yml"
+          grep -qx 'oa_snapshot_version=1' "$snapshot/manifest"
+          grep -q '^pg_volume=openanalytics_pg-data$' "$snapshot/manifest"
+          grep -q '^ch_volume=openanalytics_ch-data$' "$snapshot/manifest"
+          echo "--- manifest"; cat "$snapshot/manifest"
+
+      - name: Destroy both rows
+        run: |
+          set -euo pipefail
+          docker compose up -d postgres clickhouse
+          for attempt in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' oa-postgres)" = healthy ] \
+              && [ "$(docker inspect -f '{{.State.Health.Status}}' oa-clickhouse)" = healthy ] && break
+            sleep 3
+          done
+          docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U openanalytics -d openanalytics \
+            -c "DROP TABLE snapshot_marker;"
+          docker compose exec -T clickhouse clickhouse-client --query "DROP TABLE default.snapshot_marker"
+          # Proving the destruction, so that finding the row afterwards means the
+          # restore put it back rather than that it was never gone.
+          docker compose exec -T postgres psql -tAX -U openanalytics -d openanalytics \
+            -c "SELECT count(*) FROM information_schema.tables WHERE table_name = 'snapshot_marker';" | grep -qx 0
+          docker compose exec -T clickhouse clickhouse-client --query \
+            "SELECT count() FROM system.tables WHERE database = 'default' AND name = 'snapshot_marker'" | grep -qx 0
+
+      - name: Restore
+        run: |
+          set -euo pipefail
+          ./snapshot.sh restore --from "$snapshot" --no-start
+          docker compose up -d postgres clickhouse
+          for attempt in $(seq 1 60); do
+            pg="$(docker inspect -f '{{.State.Health.Status}}' oa-postgres)"
+            ch="$(docker inspect -f '{{.State.Health.Status}}' oa-clickhouse)"
+            echo "postgres=$pg clickhouse=$ch"
+            [ "$pg" = healthy ] && [ "$ch" = healthy ] && exit 0
+            sleep 3
+          done
+          echo "::error::a store did not come back healthy after the restore"
+          docker compose logs postgres clickhouse
+          exit 1
+
+      # Postgres coming back healthy at all is half the assertion: the data
+      # directory has to be owned by the right uid or the server refuses to
+      # start, so a restore that lost ownership fails the step above.
+      - name: Both rows are back
+        run: |
+          set -euo pipefail
+          docker compose exec -T postgres psql -tAX -U openanalytics -d openanalytics \
+            -c "SELECT note FROM snapshot_marker;" | grep -qx 'survives a restore'
+          docker compose exec -T clickhouse clickhouse-client --query \
+            "SELECT note FROM default.snapshot_marker" | grep -qx 'survives a restore'
+          echo "both stores are the way they were before the snapshot"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 100 || true

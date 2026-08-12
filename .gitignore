@@ -16,6 +16,10 @@ apps/tracker/bundle/
 infra/selfhost/env/*.env
 !infra/selfhost/env/*.env.example
 infra/selfhost/docker-compose.override.yml
+# Snapshots written by infra/selfhost/snapshot.sh: both data volumes plus a copy
+# of every secret above, which is what makes them restorable and what makes a
+# committed one a full disclosure.
+infra/selfhost/backups/
 # The GeoIP database itself is never committed: ~60 MB, stale within a month,
 # and MaxMind's may not be redistributed at all. The fetcher and the note that
 # explains the directory are.
