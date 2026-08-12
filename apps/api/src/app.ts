@@ -113,6 +113,8 @@ export interface AppDeps {
 
   /** The first-account ceiling. Injected only by tests; the default is decided below. */
   readonly setupRateLimiter?: RateLimiter
+  /** The deployment test-send ceiling. Same arrangement as `setupRateLimiter`. */
+  readonly testEmailRateLimiter?: RateLimiter
   /**
    * The anonymous widget read's budget and its two `max-age` values (ADR-0045,
    * D5 and D12). Optional for the reason `readKey` is: a bare test app should
@@ -152,6 +154,16 @@ export interface AppDeps {
     readonly vault: CredentialVault
     readonly adapters: RevenueAdapterRegistry
   }
+  /**
+   * The credential keyring on its own (migration 0043).
+   *
+   * The same object `revenue.vault` holds when revenue is wired, hoisted because
+   * the deployment-settings surface encrypts an SMTP password and a provider key
+   * with it and has nothing to do with payments. Absent, that surface reports
+   * itself closed with `reason: 'no_keyring'` rather than storing a secret it
+   * cannot protect.
+   */
+  readonly vault?: CredentialVault
   /**
    * The assistant (ADR-0046). Optional here and required one layer down, in
    * `defaultReadCost`'s shape: absent, `createApp` parses the same schema
@@ -287,6 +299,20 @@ function defaultRegistrationLimiter(): RateLimiter {
  * find by spraying.
  */
 function defaultSetupLimiter(): RateLimiter {
+  return new InProcessRateLimiter({ requestsPerMinute: 5, burst: 5 })
+}
+
+/**
+ * The test-send ceiling: five a minute, keyed on the operator's account.
+ *
+ * The button exists to be pressed after every edit to a mail relay, so the
+ * budget has to survive a real debugging session — five is roughly one press
+ * every twelve seconds, which is faster than anyone can read an inbox. What it
+ * bounds is the one thing the endpoint could otherwise become: a way to put
+ * repeated mail in somebody's inbox. That somebody is always the caller's own
+ * address, which is most of why this number can be generous at all.
+ */
+function defaultTestEmailLimiter(): RateLimiter {
   return new InProcessRateLimiter({ requestsPerMinute: 5, burst: 5 })
 }
 
@@ -636,6 +662,11 @@ export function createApp(deps: AppDeps) {
         ...(deps.realtime ? { realtime: deps.realtime } : {}),
         ...(deps.objectStorage ? { objectStorage: deps.objectStorage } : {}),
         ...(deps.revenue ? { revenue: deps.revenue } : {}),
+        // The deployment-settings surface (migration 0043). The vault is
+        // separate from `revenue` on purpose — see `AppDeps.vault` — and its
+        // absence closes the surface with a reason rather than removing it.
+        ...(deps.vault ? { vault: deps.vault } : {}),
+        testEmailRateLimiter: deps.testEmailRateLimiter ?? defaultTestEmailLimiter(),
         // The same extension object; `createBusinessRoutes` reads only its
         // `businessRoutes` half, and mounts it last on the authenticated router.
         ...(deps.cloud ? { cloud: deps.cloud } : {}),

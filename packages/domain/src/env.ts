@@ -159,6 +159,31 @@ const serviceSchemas = {
      * AUTH_PASSWORD_SIGNIN above.
      */
     AUTH_EMAIL_VERIFICATION: z.enum(['required', 'optional']).default('required'),
+    /**
+     * Whether the operator may configure this deployment from the dashboard
+     * (migration 0043).
+     *
+     * The self-host dry run found that everything a new install needs from a
+     * third party — a mail relay, a model provider — is reachable only by
+     * editing a file on the host and restarting a container, which is a wall in
+     * front of the first thing anybody does after signing in. `enabled` mounts a
+     * screen that writes those settings to `deployment_settings` instead, with
+     * the secret encrypted under `OA_CREDENTIAL_KEYRING`; the worker and the
+     * assistant prefer a stored value over the environment.
+     *
+     * **A multi-tenant deployment sets `disabled`.** There, the environment is
+     * the configuration — it is deployed, reviewed and rotated as such — and the
+     * screen would let one customer's account change how every other customer's
+     * mail is sent. The default is `enabled` because the audience for a default
+     * is the self-hoster: a fresh install is the case this exists for, and a
+     * hosted fleet is configured deliberately anyway.
+     *
+     * Not a secret, so nothing on FORBIDDEN_KEYS — the same reasoning as
+     * AUTH_PASSWORD_SIGNIN above. The worker reads the same variable (its schema
+     * below): the api writes the row and the worker delivers with it, so both
+     * halves have to agree about whether the table is in play.
+     */
+    DEPLOYMENT_SETTINGS: z.enum(['enabled', 'disabled']).default('enabled'),
     // The FRONTEND's public origin, e.g. `https://app.getopen.so`. Distinct from
     // AUTH_BASE_URL, which is Better Auth's own base and in production is the
     // *api* host: every link meant for a human — the invitation acceptance page,
@@ -306,6 +331,13 @@ const serviceSchemas = {
 
   worker: baseSchema.extend({
     DATABASE_URL: url.optional(),
+    // The worker's half of the dashboard-configurable settings (migration 0043;
+    // the api's schema above carries the full argument). `enabled` makes the
+    // email drain prefer the stored transport over `SMTP_*`/`RESEND_API_KEY`;
+    // `disabled` makes it read the environment and nothing else. Both services
+    // must agree, or the api would write a relay the worker never delivers
+    // through.
+    DEPLOYMENT_SETTINGS: z.enum(['enabled', 'disabled']).default('enabled'),
     // Native Redis/TLS consumer group; REST cannot do a blocking XREADGROUP.
     EVENT_STREAM_REDIS_URL: url.optional(),
     // The D-103 near-realtime usage counter, which the worker reconciles against

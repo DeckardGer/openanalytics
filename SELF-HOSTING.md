@@ -121,23 +121,53 @@ door for an install that runs on its owner's hardware, not a bootstrap flag.
   `https://api.<domain>/api/auth/callback/google` (or `/github`), and put the id
   and secret in `env/api.env`. A provider is offered only when both are present,
   so a deployment with neither pair simply has no buttons.
-- **Magic link** — needs a working mail transport in `env/worker.env`. Mail is a
-  worker job: the api only writes the send to an outbox. With no transport,
-  nothing is sent, and the log records only that a message existed — its subject
-  and the recipient's domain. The link itself is deliberately written nowhere,
-  because a sign-in link in a log file is a credential in something every
-  operator tails and pastes into issues, so **the log is not a way in**. The
-  worker says so at boot: `email_transport_selected` is logged at `warn` naming
-  the variables that are missing. `SMTP_HOST` alone is enough to activate SMTP;
-  the rest of the block defaults to port 587 with STARTTLS, no credential, and
-  `EMAIL_FROM` as the sender.
+- **Magic link** — needs a working mail transport, which the next step is about.
+  Mail is a worker job: the api only writes the send to an outbox. With no
+  transport, nothing is sent, and the log records only that a message existed —
+  its subject and the recipient's domain. The link itself is deliberately
+  written nowhere, because a sign-in link in a log file is a credential in
+  something every operator tails and pastes into issues, so **the log is not a
+  way in**.
 
 `docker compose run --rm create-admin --email you@example.com` still exists and
 still works. It predates the first-run screen and is now the tool for the case
 that screen cannot serve: writing an account on a deployment that already has
 one, from the host, with no browser.
 
-### 5. Add a site and check the pipeline
+### 5. Mail, and the model provider
+
+**Account → Deployment**, in the dashboard. It is where you configure the two
+things this install needs from somebody else, and it exists so that neither is
+an edit to a file on the host followed by a restart:
+
+- **Email** — a relay's host, port, TLS mode, credential and From address.
+  Saved settings win over `env/worker.env`, are stored encrypted under
+  `OA_CREDENTIAL_KEYRING`, and take effect on the worker's next drain — a few
+  seconds. **Send a test** puts a message in your own inbox and reports back
+  what the relay said: `unauthorized` is a wrong username or password,
+  `unavailable` is a host or port the container cannot reach, and `invalid` is
+  almost always a From address the relay will not send as.
+- **Assistant** — an OpenAI key, or any endpoint speaking the same API. It wins
+  over `OPENAI_API_KEY` and takes effect on the next question. Without one the
+  chat button is drawn disabled rather than offering an error.
+
+Two things worth knowing about the screen:
+
+- **Only the account that claimed the deployment sees it** — the oldest one.
+  There is no role above a site membership yet, so this is the rule, and it is
+  the same sentence the first-run screen makes.
+- **A stored secret is never shown again.** The forms report the last four
+  characters and nothing else, and leaving a password field empty keeps what is
+  stored.
+
+The env blocks stay, and they stay first-class: `SMTP_HOST` alone activates SMTP
+with port 587, STARTTLS, no credential and `EMAIL_FROM` as the sender, and the
+worker logs `email_transport_selected` at boot naming what it resolved and where
+from. A deployment that would rather keep its configuration in files can set
+`DEPLOYMENT_SETTINGS=disabled` on both the api and the worker, and the screen
+never appears.
+
+### 6. Add a site and check the pipeline
 
 Create a site in the dashboard, paste the snippet it gives you, then:
 
@@ -319,23 +349,23 @@ Nothing here refuses to boot. Every one of these degrades a surface and says so
 in the log, which is the deliberate shape: a deployment must not fail over a
 feature it has not enabled.
 
-| Missing                                                | What breaks                                                                                                                                                             |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mail transport (`RESEND_API_KEY` / SMTP) on the worker | **Magic-link sign-in cannot complete**; invitations never arrive. Nothing is sent and the link is written nowhere. Sign in with the account the first-run screen made.  |
-| `AUTH_TRUSTED_ORIGINS` on the api                      | **Every browser call from the dashboard is refused.** No `Access-Control-Allow-Origin` is emitted at all — fail-closed by design.                                       |
-| `APP_BASE_URL` on the api                              | Human-facing links (invitation acceptance, billing returns) point at pages the api does not serve.                                                                      |
-| `GOOGLE_*` / `GITHUB_*`                                | No Google/GitHub button. A provider appears only when both its id and secret are present.                                                                               |
-| `GEOIP_DB_PATH`                                        | Every event carries null geo. No country, no city.                                                                                                                      |
-| `CLICKHOUSE_MAINTENANCE_*` on the worker               | **Site and account deletion queue and retry forever** instead of erasing anything. A wait, not a loss — but a silent one.                                               |
-| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`          | Billing surfaces disable themselves. Normally what a self-hosted install wants.                                                                                         |
-| `OPENAI_API_KEY`                                       | The AI assistant answers `503 not configured` — _before_ any question is charged.                                                                                       |
-| `OA_CREDENTIAL_KEYRING`                                | Revenue-connection routes that encrypt are not mounted (404). Reading and disconnecting still work.                                                                     |
-| `CREDENTIAL_SOURCE_SECRET`                             | No credential events are journalled at all. Reads are untouched.                                                                                                        |
-| `OBJECT_STORAGE_*`                                     | Data import and export are not mounted.                                                                                                                                 |
-| `PREVIEW_TOKEN_*`                                      | Rule preview is unavailable; the published rule set is served instead. A preview that cannot be authenticated is served as no preview, never as an unauthenticated one. |
-| `REALTIME_CACHE_REDIS_URL` on the gateway              | Replay defence becomes per-process — correct only with a single gateway instance. It warns.                                                                             |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_NOTIFY_CHAT_ID`       | Notifications use the log transport.                                                                                                                                    |
-| `METRICS_REMOTE_WRITE_*`                               | No metrics pipeline; the structured-log metrics floor remains.                                                                                                          |
+| Missing                                                                  | What breaks                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mail transport (stored settings, `RESEND_API_KEY` or SMTP) on the worker | **Magic-link sign-in cannot complete**; invitations never arrive. Nothing is sent and the link is written nowhere. Sign in with the account the first-run screen made, then configure a relay in Account → Deployment. |
+| `AUTH_TRUSTED_ORIGINS` on the api                                        | **Every browser call from the dashboard is refused.** No `Access-Control-Allow-Origin` is emitted at all — fail-closed by design.                                                                                      |
+| `APP_BASE_URL` on the api                                                | Human-facing links (invitation acceptance, billing returns) point at pages the api does not serve.                                                                                                                     |
+| `GOOGLE_*` / `GITHUB_*`                                                  | No Google/GitHub button. A provider appears only when both its id and secret are present.                                                                                                                              |
+| `GEOIP_DB_PATH`                                                          | Every event carries null geo. No country, no city.                                                                                                                                                                     |
+| `CLICKHOUSE_MAINTENANCE_*` on the worker                                 | **Site and account deletion queue and retry forever** instead of erasing anything. A wait, not a loss — but a silent one.                                                                                              |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`                            | Billing surfaces disable themselves. Normally what a self-hosted install wants.                                                                                                                                        |
+| `OPENAI_API_KEY` **and** no stored provider                              | The AI assistant answers `503 not configured` — _before_ any question is charged — and the dashboard draws its chat button disabled.                                                                                   |
+| `OA_CREDENTIAL_KEYRING`                                                  | Revenue-connection routes that encrypt are not mounted (404); reading and disconnecting still work. Account → Deployment closes with `no_keyring`, because it would be storing secrets it cannot protect.              |
+| `CREDENTIAL_SOURCE_SECRET`                                               | No credential events are journalled at all. Reads are untouched.                                                                                                                                                       |
+| `OBJECT_STORAGE_*`                                                       | Data import and export are not mounted.                                                                                                                                                                                |
+| `PREVIEW_TOKEN_*`                                                        | Rule preview is unavailable; the published rule set is served instead. A preview that cannot be authenticated is served as no preview, never as an unauthenticated one.                                                |
+| `REALTIME_CACHE_REDIS_URL` on the gateway                                | Replay defence becomes per-process — correct only with a single gateway instance. It warns.                                                                                                                            |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_NOTIFY_CHAT_ID`                         | Notifications use the log transport.                                                                                                                                                                                   |
+| `METRICS_REMOTE_WRITE_*`                                                 | No metrics pipeline; the structured-log metrics floor remains.                                                                                                                                                         |
 
 ---
 

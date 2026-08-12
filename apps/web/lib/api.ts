@@ -1119,6 +1119,58 @@ export const auth = {
     send<null>("POST", "/v1/auth/setup", { body }),
 };
 
+export type DeploymentSettings = Schemas["DeploymentSettings"];
+export type DeploymentStoredSetting = Schemas["DeploymentStoredSetting"];
+export type DeploymentTestEmailStatus = Schemas["DeploymentTestEmailStatus"];
+
+/**
+ * What the operator configures from the dashboard rather than from a file on
+ * the host.
+ *
+ * `get` is what decides whether the screen is offered at all: it answers
+ * `editable: false` with a reason for a deployment that is configured from its
+ * environment, one with no keyring, and a caller who is not the operator — so
+ * the tab can simply not be drawn rather than every panel discovering a 403.
+ *
+ * A secret is written and never read back. The `password` and `api_key` fields
+ * carry the surface's three-way semantics: omit to keep, a string to replace,
+ * `null` to remove.
+ */
+export const deployment = {
+  get: () => api.get<DeploymentSettings>("/v1/deployment/settings"),
+  putEmail: (body: {
+    host: string;
+    port?: number;
+    secure?: boolean;
+    user?: string | null;
+    password?: string | null;
+    from?: string | null;
+  }) =>
+    send<DeploymentStoredSetting>("PUT", "/v1/deployment/settings/email", {
+      body,
+    }),
+  clearEmail: () => send<null>("DELETE", "/v1/deployment/settings/email"),
+  putAssistant: (body: {
+    api_key?: string | null;
+    model?: string | null;
+    base_url?: string | null;
+  }) =>
+    send<DeploymentStoredSetting>("PUT", "/v1/deployment/settings/assistant", {
+      body,
+    }),
+  clearAssistant: () =>
+    send<null>("DELETE", "/v1/deployment/settings/assistant"),
+  sendTestEmail: () =>
+    send<{ delivery_id: string | null; to: string }>(
+      "POST",
+      "/v1/deployment/settings/email/test"
+    ),
+  testEmailStatus: (deliveryId: string) =>
+    api.get<DeploymentTestEmailStatus>(
+      `/v1/deployment/settings/email/test/${encodeURIComponent(deliveryId)}`
+    ),
+};
+
 export const publicDashboard = {
   get: (siteId: string) =>
     api.get<PublicDashboardSettings>(`/v1/sites/${siteId}/public-dashboard`),

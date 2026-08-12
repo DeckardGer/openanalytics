@@ -66,3 +66,127 @@ describe('worker mail transport boot line', () => {
     expect(line['transport']).toBe('resend')
   })
 })
+
+/**
+ * Where the transport comes from, once one can be stored (migration 0043).
+ *
+ * The rule is one sentence — **a stored transport wins over the environment** —
+ * and it is worth pinning from both directions, because each failure is silent.
+ * A stored relay that lost to `RESEND_API_KEY` would send the operator's mail
+ * through a host they thought they had replaced; an environment relay that lost
+ * to an empty table would stop a working deployment's mail the day it upgraded.
+ */
+
+/** A 32-byte key, base64, so `createCredentialVault` accepts the ring. */
+const KEYRING = JSON.stringify({
+  active: 'k1',
+  keys: { k1: Buffer.alloc(32, 7).toString('base64') },
+})
+
+/** `readDeploymentSetting`'s chain, and nothing else: a drain that grew a
+ * second query against this stub would fail here rather than pass by accident. */
+const dbWithSetting = (settings: Record<string, unknown> | null) =>
+  ({
+    select: () => ({
+      from: () => ({
+        where: async () =>
+          settings === null
+            ? []
+            : [
+                {
+                  scope: 'email',
+                  settings,
+                  encryptedSecret: null,
+                  keyVersion: null,
+                  secretLast4: '',
+                  updatedByUserId: null,
+                  updatedAt: new Date('2026-08-12T00:00:00.000Z'),
+                },
+              ],
+      }),
+    }),
+  }) as unknown as Database
+
+async function bootWith(env: ServiceEnv<'worker'>, database: Database) {
+  const captured = createCapturedLogger()
+  const drain = startEmailDrain({ db: database, env, logger: captured.logger })
+  await drain.stop()
+  const lines = captured.find('email_transport_selected')
+  expect(lines).toHaveLength(1)
+  return lines[0] as Record<string, unknown>
+}
+
+describe('stored mail settings', () => {
+  it('prefers a stored relay over the environment, including over Resend', async () => {
+    const line = await bootWith(
+      workerEnv({
+        DEPLOYMENT_SETTINGS: 'enabled',
+        OA_CREDENTIAL_KEYRING: KEYRING,
+        RESEND_API_KEY: 're-not-a-real-key',
+        SMTP_HOST: 'env-relay.example',
+      }),
+      dbWithSetting({ host: 'stored-relay.example', port: 587, secure: false }),
+    )
+
+    expect(line['transport']).toBe('smtp')
+    expect(line['source']).toBe('database')
+  })
+
+  it('falls back to the environment when the table holds nothing', async () => {
+    const line = await bootWith(
+      workerEnv({
+        DEPLOYMENT_SETTINGS: 'enabled',
+        OA_CREDENTIAL_KEYRING: KEYRING,
+        RESEND_API_KEY: 're-not-a-real-key',
+      }),
+      dbWithSetting(null),
+    )
+
+    expect(line['transport']).toBe('resend')
+    expect(line['source']).toBe('environment')
+  })
+
+  it('never reads the table when the deployment is configured from its environment', async () => {
+    // `disabled` is what a multi-tenant deployment sets, and there the table
+    // must not be consulted at all — a stub that throws on any query is the
+    // only way to assert "did not read" rather than "read and ignored".
+    const forbidden = {
+      select: () => {
+        throw new Error('the table must not be read when DEPLOYMENT_SETTINGS is disabled')
+      },
+    } as unknown as Database
+
+    const line = await bootWith(
+      workerEnv({
+        DEPLOYMENT_SETTINGS: 'disabled',
+        OA_CREDENTIAL_KEYRING: KEYRING,
+        SMTP_HOST: 'env-relay.example',
+      }),
+      forbidden,
+    )
+
+    expect(line['transport']).toBe('smtp')
+    expect(line['source']).toBe('environment')
+  })
+
+  it('says so and keeps delivering when the keyring is unusable', async () => {
+    const captured = createCapturedLogger()
+    const drain = startEmailDrain({
+      db: dbWithSetting({ host: 'stored-relay.example' }),
+      env: workerEnv({
+        DEPLOYMENT_SETTINGS: 'enabled',
+        OA_CREDENTIAL_KEYRING: '{not json',
+        SMTP_HOST: 'env-relay.example',
+      }),
+      logger: captured.logger,
+    })
+    await drain.stop()
+
+    // The ring is what reads the stored row, so a broken one costs the stored
+    // transport and nothing else: mail the environment can still deliver has
+    // nothing to do with it.
+    expect(captured.find('deployment_settings_not_readable')).toHaveLength(1)
+    const line = captured.find('email_transport_selected')[0] as Record<string, unknown>
+    expect(line['source']).toBe('environment')
+  })
+})

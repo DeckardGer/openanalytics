@@ -105,6 +105,161 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/deployment/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this deployment is configured with, and whether it can be changed here.
+         * @description The settings an operator supplies from a third party — a mail relay, a
+         *     model provider — stored in the deployment rather than in an env file on
+         *     the host.
+         *
+         *     **`editable` decides whether the screen exists at all.** It is false, with
+         *     a `reason`, when the deployment is configured from its environment
+         *     (`disabled`), when there is no `OA_CREDENTIAL_KEYRING` to encrypt a secret
+         *     with (`no_keyring`), or when the caller is not the operator
+         *     (`not_operator`). A closed response carries no values: a deployment that
+         *     turned this off has not agreed to disclose its relay to anybody.
+         *
+         *     **The operator is the account that claimed the deployment** — the oldest
+         *     one. There is no role above a site membership, and this is the same
+         *     sentence the first-run screen makes to the person creating that account.
+         *
+         *     **A stored secret is never returned.** Each scope reports `secret_set` and
+         *     `secret_last4`, and nothing else about it.
+         *
+         *     The mail block reports only what this service can see. `SMTP_*` and
+         *     `RESEND_API_KEY` are forbidden on the api — the worker delivers mail, so
+         *     the worker holds the relay credential — so the api genuinely cannot tell
+         *     whether mail already works from the environment, and does not guess. Send
+         *     a test to find out.
+         */
+        get: operations["getDeploymentSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/deployment/settings/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Store the mail transport this deployment sends through.
+         * @description A whole-row replace: what is submitted is the complete state of the
+         *     setting, so a field left out is a field cleared.
+         *
+         *     **The password is the one exception**, because a form cannot resend a
+         *     value it was never given. Omit `password` to keep the stored one, send a
+         *     string to replace it, and send `null` to remove it — a relay on the same
+         *     host often wants no credential at all.
+         *
+         *     The stored transport wins over the worker's `SMTP_*` and `RESEND_API_KEY`,
+         *     and takes effect on the worker's next drain — a few seconds, no restart.
+         *     Removing it (`DELETE`) falls back to the environment.
+         */
+        put: operations["setDeploymentEmailSettings"];
+        post?: never;
+        /**
+         * Remove the stored mail transport, falling back to the environment.
+         * @description `204` whether or not a row was stored: the state the caller asked for is
+         *     the state that now holds.
+         */
+        delete: operations["clearDeploymentEmailSettings"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/deployment/settings/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test message to the operator's own address.
+         * @description **Queued, not sent.** The api holds no mail credential — the worker is the
+         *     only process that delivers — so this writes an outbox row and answers
+         *     `202`. Poll `GET /v1/deployment/settings/email/test/{delivery_id}` for the
+         *     outcome. What it proves is that the transport *the worker* resolved works,
+         *     which is the thing that was in doubt.
+         *
+         *     The recipient is the caller's own address and there is no field for it: a
+         *     deployment-wide send button that took an address would be an open relay
+         *     for one message.
+         */
+        post: operations["sendDeploymentTestEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/deployment/settings/email/test/{delivery_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What became of a queued test message.
+         * @description `pending` while the worker has not finished with it — including between a
+         *     failed attempt and its retry, which is why `reason` is populated on a
+         *     pending row too. `reason` is the transport's own categorized outcome
+         *     (`unauthorized`, `unavailable`, `invalid`), never a raw relay reply.
+         */
+        get: operations["getDeploymentTestEmailStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/deployment/settings/assistant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Store the model provider the assistant talks to.
+         * @description Same rules as the mail transport, with one difference: `api_key` is
+         *     required the first time, because a provider with no key is not a
+         *     configuration — storing one would make the assistant report itself
+         *     available and then fail on the first question.
+         *
+         *     The stored key wins over `OPENAI_API_KEY` and takes effect on the next
+         *     request, with no restart.
+         */
+        put: operations["setDeploymentAssistantSettings"];
+        post?: never;
+        /** Remove the stored model provider, falling back to the environment. */
+        delete: operations["clearDeploymentAssistantSettings"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me": {
         parameters: {
             query?: never;
@@ -4671,6 +4826,129 @@ export interface components {
             kind: "oauth" | "email" | "password";
         };
         /**
+         * @description Why the deployment settings cannot be edited here.
+         *
+         *     - `disabled` — `DEPLOYMENT_SETTINGS` is off. The environment is this
+         *       deployment's configuration, which is what a multi-tenant install sets.
+         *     - `no_keyring` — there is no usable `OA_CREDENTIAL_KEYRING`, so a secret
+         *       could be stored but not protected. The whole surface closes rather than
+         *       offering the half of it that carries no secret.
+         *     - `not_operator` — the caller is not the account that claimed this
+         *       deployment.
+         * @enum {string}
+         */
+        DeploymentSettingsClosedReason: "disabled" | "no_keyring" | "not_operator";
+        /**
+         * @description One stored scope, as every read surface returns it: the non-secret fields
+         *     verbatim, plus what can be said about the secret without disclosing it.
+         *     Null when nothing is stored for that scope.
+         */
+        DeploymentStoredSetting: {
+            /** @description Mail scope only. */
+            host?: string;
+            /** @description Mail scope only. */
+            port?: number;
+            /**
+             * @description Mail scope only. Implicit TLS from the first byte — set for port 465,
+             *     left off for 587, where the connection is still upgraded through
+             *     STARTTLS.
+             */
+            secure?: boolean;
+            /** @description Mail scope only. Absent on an unauthenticated relay. */
+            user?: string;
+            /**
+             * @description Mail scope only. The envelope sender, which relays routinely require
+             *     to be the authenticated mailbox. Accepts `Name <address>`.
+             */
+            from?: string;
+            /** @description Assistant scope only. */
+            model?: string;
+            /** @description Assistant scope only. */
+            base_url?: string;
+            secret_set: boolean;
+            /**
+             * @description The last four characters of the stored secret, or empty — both when
+             *     there is none and when it is too short for four characters to be a
+             *     tail rather than most of it.
+             */
+            secret_last4: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DeploymentSettings: {
+            editable: boolean;
+            reason?: components["schemas"]["DeploymentSettingsClosedReason"];
+            /**
+             * @description Only what the api can see. It holds no relay credential by design, so
+             *     it cannot report whether the worker's environment configures mail —
+             *     the test send answers that end to end.
+             */
+            email?: {
+                stored: components["schemas"]["DeploymentStoredSetting"] | null;
+            };
+            assistant?: {
+                /**
+                 * @description Which configuration is in force. A stored key wins.
+                 * @enum {string}
+                 */
+                source: "database" | "environment" | "none";
+                stored: components["schemas"]["DeploymentStoredSetting"] | null;
+                /**
+                 * @description The non-secret half of `OPENAI_API_KEY`'s configuration, when the
+                 *     api has one. Null otherwise.
+                 */
+                environment: {
+                    model?: string;
+                    base_url?: string;
+                } | null;
+            };
+        };
+        DeploymentEmailSettingsRequest: {
+            /** @description The relay's hostname. The one field with no defensible default. */
+            host: string;
+            /** @default 587 */
+            port: number;
+            /**
+             * @description Defaults to true on port 465 and false everywhere else. False does
+             *     not mean plaintext: the connection is still upgraded through STARTTLS
+             *     when the relay advertises it, which is the whole of how 587 works.
+             */
+            secure?: boolean;
+            user?: string | null;
+            /**
+             * @description Omit to keep the stored password, send a string to replace it, send
+             *     `null` to remove it.
+             */
+            password?: string | null;
+            /** @description An address, or `Name <address>`. */
+            from?: string | null;
+        };
+        DeploymentAssistantSettingsRequest: {
+            /**
+             * @description Omit to keep the stored key. Required when none is stored: a provider
+             *     with no key is not a configuration.
+             */
+            api_key?: string | null;
+            model?: string | null;
+            /** @description An http or https URL. */
+            base_url?: string | null;
+        };
+        DeploymentTestEmailStatus: {
+            /** @enum {string} */
+            status: "pending" | "delivered" | "failed";
+            attempts: number;
+            /**
+             * @description The transport's categorized outcome — `unauthorized` (the relay
+             *     rejected the credential), `unavailable` (it could not be reached),
+             *     `invalid` (it refused the message) — never a raw relay reply.
+             *     Populated on a `pending` row that has already failed once, because
+             *     waiting four minutes to learn the password is wrong helps nobody.
+             */
+            reason: string | null;
+            /** Format: date-time */
+            delivered_at: string | null;
+        };
+        /**
          * @description A member of the site. `email` and `name` are returned to a caller who is
          *     already a member of the same site — the team screen has to name people,
          *     and the pending-invite list already returns the invitee's email, so
@@ -8086,6 +8364,244 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    getDeploymentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deployment's settings, or the reason they cannot be edited. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentSettings"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    setDeploymentEmailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentEmailSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored settings, without the password. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentStoredSetting"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            /**
+             * @description The surface is closed (`FORBIDDEN`, with `details.reason` one of
+             *     `disabled`, `no_keyring`, `not_operator`).
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    clearDeploymentEmailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No stored mail transport remains. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description The surface is closed (`FORBIDDEN`, with `details.reason`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    sendDeploymentTestEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The test message is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Null only if an identical send was already queued, which the
+                         *     fresh idempotency key makes unreachable in practice.
+                         */
+                        delivery_id: string | null;
+                        /** Format: email */
+                        to: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description The surface is closed (`FORBIDDEN`, with `details.reason`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many tests from this account. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getDeploymentTestEmailStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                delivery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The delivery's current state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentTestEmailStatus"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description The surface is closed (`FORBIDDEN`, with `details.reason`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description No test send with that id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    setDeploymentAssistantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentAssistantSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored settings, without the key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentStoredSetting"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            /** @description The surface is closed (`FORBIDDEN`, with `details.reason`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    clearDeploymentAssistantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No stored model provider remains. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            /** @description The surface is closed (`FORBIDDEN`, with `details.reason`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
             };
         };
     };

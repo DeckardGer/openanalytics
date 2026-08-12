@@ -73,10 +73,13 @@ import { createImportCatalogRoutes, createImportRoutes } from './imports.ts'
 import { createRevenueAnalyticsRoutes } from './revenue-analytics.ts'
 import { createRevenueCatalogRoutes, createRevenueRoutes } from './revenue.ts'
 import { idempotent } from './idempotency.ts'
+import { createDeploymentSettingsRoutes } from './deployment-settings.ts'
 import { createMeRoutes } from './me.ts'
 import { createMeDeletionRoutes } from './me-deletion.ts'
+import type { RateLimiter } from './rate-limit.ts'
 import { createRealtimeRoutes } from './realtime.ts'
 import { createAssistantRoutes } from './assistant.ts'
+import { createAssistantClientResolver } from './assistant-provider.ts'
 import { requireCapability, siteMembership, type ApiVariables } from './middleware.ts'
 import { createSiteToApiError, ownershipToApiError } from './ownership-errors.ts'
 import { principalAuth } from './grant-arm.ts'
@@ -144,6 +147,15 @@ export interface RoutesDeps {
    * pre-session half cannot live in this file by definition.
    */
   readonly cloud?: ApiCloudExtension
+  /**
+   * The credential keyring on its own (migration 0043), for the deployment
+   * settings surface. The same object `revenue.vault` carries; hoisted because
+   * storing an SMTP password has nothing to do with payments, and a build with a
+   * ring and no revenue adapters still needs one.
+   */
+  readonly vault?: CredentialVault
+  /** The deployment test-send ceiling. `app.ts` always supplies one. */
+  readonly testEmailRateLimiter: RateLimiter
 }
 
 type Env = { Variables: ApiVariables }
@@ -485,6 +497,27 @@ export function createBusinessRoutes(deps: RoutesDeps): Hono<Env> {
   // subject addressed by the same session, and nothing else.
   authed.route('/', createMeDeletionRoutes({ db }))
 
+  /**
+   * What the operator configures from the dashboard rather than from a file on
+   * the host (migration 0043).
+   *
+   * Mounted unconditionally, like the assistant and for the same reason: the
+   * surface has three ways of being closed — the deployment turned it off, there
+   * is no keyring, the caller is not the operator — and each of them is a
+   * sentence the screen should be able to say. An absent route would say `401`
+   * to all three, which is "you are signed out" for a decision somebody made on
+   * purpose.
+   */
+  authed.route(
+    '/',
+    createDeploymentSettingsRoutes({
+      db,
+      env,
+      testEmailRateLimiter: deps.testEmailRateLimiter,
+      ...(deps.vault ? { vault: deps.vault } : {}),
+    }),
+  )
+
   // Analytics read surface, when a gateway is configured. Mounted on the
   // session-authenticated subtree; each route adds its own membership + billing
   // entitlement guard (docs snapshot 02 §19).
@@ -543,6 +576,15 @@ export function createBusinessRoutes(deps: RoutesDeps): Hono<Env> {
       dispatch: deps.assistant.dispatch,
       resourceUrl: deps.assistant.resourceUrl,
       ...(deps.assistant.client ? { client: deps.assistant.client } : {}),
+      // Which provider is in force is a per-request question since migration
+      // 0043: a key typed into the deployment settings screen must work without
+      // a restart. Falls back to the env-built client when nothing is stored.
+      resolveClient: createAssistantClientResolver({
+        db,
+        config: deps.assistant.config,
+        ...(deps.assistant.client ? { envClient: deps.assistant.client } : {}),
+        ...(deps.vault ? { vault: deps.vault } : {}),
+      }),
     }),
   )
 

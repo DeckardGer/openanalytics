@@ -274,11 +274,17 @@ if (
 // one warn log says why, rather than a surface that answers failures — a
 // disconnect that cannot erase the ciphertext it claims to erase would be worse
 // than no disconnect at all. The provider catalog mounts regardless (routes.ts).
+//
+// The ring itself is kept beside `revenue` rather than only inside it: the
+// deployment-settings surface (migration 0043) encrypts an SMTP password and a
+// provider key with the same vault and has nothing to do with revenue, so a
+// build with a ring and no interest in payments still gets one.
+let vault: CredentialVault | undefined
 let revenue:
   { vault: CredentialVault; adapters: ReturnType<typeof createRevenueAdapterRegistry> } | undefined
 if (env.OA_CREDENTIAL_KEYRING) {
   try {
-    const vault = createCredentialVault(env.OA_CREDENTIAL_KEYRING)
+    vault = createCredentialVault(env.OA_CREDENTIAL_KEYRING)
     revenue = { vault, adapters: createRevenueAdapterRegistry([createStripeRevenueAdapter()]) }
     // The active version's *label* — never material. It is what an operator
     // mid-rotation needs to confirm from a startup log.
@@ -322,6 +328,7 @@ const app = createApp({
   ...(realtime ? { realtime } : {}),
   ...(objectStorage ? { objectStorage } : {}),
   ...(revenue ? { revenue } : {}),
+  ...(vault ? { vault } : {}),
 })
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {

@@ -3,6 +3,7 @@
 import {
   Analytics01Icon,
   PlugSocketIcon,
+  ServerStack01Icon,
   Settings02Icon,
   UserCircleIcon,
 } from "hugeicons-react";
@@ -11,6 +12,10 @@ import * as React from "react";
 import { accountTabs, AccountUsagePanel } from "@seam/slots";
 import { ConnectedAppsSection } from "@/components/dashboard/connected-apps-section";
 import { DeleteAccountSection } from "@/components/dashboard/delete-account-section";
+import {
+  DeploymentSection,
+  useDeploymentSettings,
+} from "@/components/dashboard/deployment-section";
 import {
   SectionHeading,
   SettingsPanel,
@@ -66,22 +71,49 @@ const TABS: Tab[] = [
   })),
 ];
 
-const isTabId = (value: unknown): boolean =>
-  TABS.some((tab) => tab.id === value);
+/**
+ * Deployment sits beside them, and only for the one account that may use it.
+ *
+ * It is not an account setting at all — it configures the whole install — but
+ * this is where the person who runs a self-hosted install already comes to
+ * change things about it, and a second board for one operator would be a second
+ * navigation for a screen most deployments never show. The read decides: a
+ * member who is not the operator, and every account on a deployment configured
+ * from its environment, sees no tab rather than a tab that refuses them.
+ */
+const DEPLOYMENT_TAB: Tab = {
+  id: "deployment",
+  label: "Deployment",
+  icon: ServerStack01Icon,
+};
 
 export function AccountBoard() {
   const [active, setActive] = React.useState<string>("profile");
+  const deploymentState = useDeploymentSettings();
+  const showDeployment = deploymentState.settings?.editable === true;
+  const tabs = React.useMemo(
+    () => (showDeployment ? [...TABS, DEPLOYMENT_TAB] : TABS),
+    [showDeployment]
+  );
+
+  const isTabId = React.useCallback(
+    (value: unknown): boolean => tabs.some((tab) => tab.id === value),
+    [tabs]
+  );
 
   // Deep links land on a named tab (`?tab=billing`) — the old /dashboard/
   // billing address redirects here with it, and Stripe's return URLs ride
   // along untouched for the BillingBoard to read. Microtask hop so the
   // server render and hydration agree on the default first.
+  // Re-run once the deployment read lands: `?tab=deployment` is a real deep
+  // link (SELF-HOSTING points at it), and on the first pass that tab does not
+  // exist yet.
   React.useEffect(() => {
     void Promise.resolve().then(() => {
       const requested = new URLSearchParams(window.location.search).get("tab");
       if (requested !== null && isTabId(requested)) setActive(requested);
     });
-  }, []);
+  }, [isTabId]);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 lg:flex-row lg:items-start lg:gap-8">
@@ -99,7 +131,7 @@ export function AccountBoard() {
           aria-label="Account sections"
           className="-mx-2.5 flex gap-0.5 overflow-x-auto px-2.5 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
         >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const selected = tab.id === active;
           return (
             <button
@@ -189,6 +221,15 @@ export function AccountBoard() {
                 ) : (
                   <UnmeteredNotice />
                 )}
+              </>
+            ) : null}
+            {active === "deployment" && showDeployment ? (
+              <>
+                <SectionHeading
+                  description="What this install needs from somewhere else — a mail relay, a model provider — so you don’t have to edit a file on the host and restart."
+                  title="Deployment"
+                />
+                <DeploymentSection state={deploymentState} />
               </>
             ) : null}
             {accountTabs.map((tab) =>

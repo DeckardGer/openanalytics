@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import type { Database, Executor } from '../client.ts'
 import { newId } from '../ids.ts'
-import { outbox } from '../schema/outbox.ts'
+import { outbox, type OutboxStatus } from '../schema/outbox.ts'
 
 /**
  * Outbox repository.
@@ -124,6 +124,46 @@ export async function readOutboxBacklog(db: Database): Promise<OutboxBacklogRow[
     count: Number(row.count),
     oldestAgeMs: Number(row.oldest_age_ms),
   }))
+}
+
+export interface OutboxDeliveryRow {
+  readonly id: string
+  readonly topic: string
+  readonly status: OutboxStatus
+  readonly attempts: number
+  /** The categorized reason a transport reported. Never a raw provider body —
+   * `classifySmtpFailure` and the Resend adapter both narrow before this is
+   * written, which is what makes it safe to render to an operator. */
+  readonly lastError: string | null
+  readonly deliveredAt: Date | null
+}
+
+/**
+ * One outbox row, by id.
+ *
+ * The read behind "did my test email arrive?". Nothing else needs it: delivery
+ * is otherwise a fire-and-forget side effect whose failures belong in the
+ * worker's logs, and a general status endpoint over the outbox would be a way to
+ * enumerate every message this deployment has ever sent. The caller checks the
+ * topic before answering, so an id from any other topic reads as "not found".
+ */
+export async function readOutboxDelivery(
+  db: Database,
+  id: string,
+): Promise<OutboxDeliveryRow | null> {
+  const [row] = await db
+    .select({
+      id: outbox.id,
+      topic: outbox.topic,
+      status: outbox.status,
+      attempts: outbox.attempts,
+      lastError: outbox.lastError,
+      deliveredAt: outbox.deliveredAt,
+    })
+    .from(outbox)
+    .where(eq(outbox.id, id))
+  if (!row) return null
+  return { ...row, deliveredAt: row.deliveredAt ? new Date(row.deliveredAt) : null }
 }
 
 export async function markOutboxDelivered(db: Database, id: string): Promise<void> {

@@ -23,6 +23,10 @@ export interface EmailOutboxPayload {
      * whose *content* is stranger-supplied; its recipient is not, and that is
      * the distinction the whole endpoint rests on. */
     | 'form_notification'
+    /** The operator proving their own mail settings work (migration 0043). The
+     * only kind nobody asked to receive — which is why its recipient is always
+     * the address of the account that pressed the button, never a field. */
+    | 'deployment_test'
   readonly to: string
   readonly subject: string
   readonly html: string
@@ -57,7 +61,8 @@ export function parseEmailOutboxPayload(value: unknown): EmailOutboxPayload {
     kind !== 'magic_link' &&
     kind !== 'billing_transfer_offer' &&
     kind !== 'rapid_burn' &&
-    kind !== 'form_notification'
+    kind !== 'form_notification' &&
+    kind !== 'deployment_test'
   ) {
     throw new Error('email outbox payload has an unknown kind')
   }
@@ -274,6 +279,44 @@ export function buildFormNotificationEmailPayload(input: {
     subject: input.subject,
     html: `<p>New submission from the ${escapeHtml(input.formId)} form.</p>${rows}`,
     text: `New submission from the ${input.formId} form.\n\n${text}`,
+  }
+}
+
+/**
+ * The message the deployment's mail settings prove themselves with.
+ *
+ * It goes through the outbox like every other send rather than being delivered
+ * from the request that asked for it, which is the whole architecture in one
+ * decision: the api holds no mail credential (`SMTP_PASS` is on its forbidden
+ * list) and the worker is the only process that delivers. So this endpoint
+ * cannot report "sent" — it reports "queued", and the operator watches the row.
+ * That is slower to answer and it is the honest answer: what it proves is that
+ * the transport the *worker* resolved works, which is the thing that was in
+ * doubt.
+ *
+ * The copy says which relay it came from, because an operator testing a change
+ * needs to tell this message apart from the one the previous settings sent.
+ */
+export function buildDeploymentTestEmailPayload(input: {
+  to: string
+  productName: string
+  /** The mail host the worker is expected to deliver through. */
+  transportLabel: string
+}): EmailOutboxPayload {
+  const product = escapeHtml(input.productName)
+  const label = escapeHtml(input.transportLabel)
+  return {
+    kind: 'deployment_test',
+    to: input.to,
+    subject: `${input.productName} mail is working`,
+    html:
+      `<p>Your ${product} deployment sent this to prove its mail settings work.</p>` +
+      `<p>It was delivered through <strong>${label}</strong>. Invitations, sign-in links and ` +
+      `verification email take the same route.</p>`,
+    text:
+      `Your ${input.productName} deployment sent this to prove its mail settings work. ` +
+      `It was delivered through ${input.transportLabel}. Invitations, sign-in links and ` +
+      `verification email take the same route.`,
   }
 }
 

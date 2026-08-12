@@ -17,6 +17,7 @@ import {
 import { Hono } from 'hono'
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming'
 
+import type { AssistantClientResolver } from './assistant-provider.ts'
 import type { ApiVariables } from './middleware.ts'
 import {
   MCP_TOOLS,
@@ -81,6 +82,15 @@ export interface AssistantRoutesDeps {
    * as "you are signed out".
    */
   readonly client?: OpenAiChatClient
+  /**
+   * The provider as of *this request* (migration 0043).
+   *
+   * A key stored from the deployment settings screen has to take effect without
+   * a restart, so "is there a provider" is no longer a startup fact. Optional
+   * only so a test can build these routes with a literal client; `app.ts` always
+   * supplies one, and it falls back to `client` when nothing is stored.
+   */
+  readonly resolveClient?: AssistantClientResolver
 }
 
 /**
@@ -270,6 +280,10 @@ export function createAssistantRoutes(deps: AssistantRoutesDeps): Hono<Env> {
     return messages
   }
 
+  /** `client` when nothing was injected, so a test that passes a literal one
+   * behaves exactly as it did before the resolver existed. */
+  const currentClient = deps.resolveClient ?? (async () => deps.client)
+
   const usageJson = async (userId: string) => {
     const window = await readAssistantUsage(db, userId)
     const limit = config.ASSISTANT_DAILY_QUESTION_LIMIT
@@ -293,7 +307,7 @@ export function createAssistantRoutes(deps: AssistantRoutesDeps): Hono<Env> {
          * question it should have been asking first, on the read it already
          * makes.
          */
-        available: deps.client !== undefined,
+        available: (await currentClient()) !== undefined,
         window_hours: ASSISTANT_USAGE_WINDOW_HOURS,
         limit,
         used: window.used,
@@ -370,7 +384,7 @@ export function createAssistantRoutes(deps: AssistantRoutesDeps): Hono<Env> {
     // deployment that has no model is an operator problem, and it must not eat
     // the caller's daily allowance. A provider that *fails* is charged (below) —
     // that slot really was consumed.
-    const client = deps.client
+    const client = await currentClient()
     if (!client) {
       throw new ApiError(
         'SERVICE_UNAVAILABLE',

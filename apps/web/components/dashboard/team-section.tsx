@@ -10,6 +10,7 @@ import {
   PlusIcon,
   SettingsIcon,
 } from "@/components/icons/hugeicons";
+import { useDeploymentSettings } from "@/components/dashboard/deployment-section";
 import { FlowDialog } from "@/components/dashboard/flow-dialog";
 import { SettingsPanel } from "@/components/dashboard/settings-panel";
 import {
@@ -115,6 +116,11 @@ export function TeamSection({ site }: { site: SiteSummary }) {
     () => MOCK_INVITES,
     site.site_id
   );
+  // Only to say whether the operator still has to configure mail. Cheap — one
+  // small read that answers `{ editable: false }` for everybody else — and it
+  // is the difference between an invite that silently goes nowhere and a
+  // sentence saying why.
+  const { settings: deploymentSettings } = useDeploymentSettings();
 
   // Mock-mode copies so actions stay visible without an api behind them.
   const [localMembers, setLocalMembers] = React.useState<SiteMember[] | null>(
@@ -489,7 +495,7 @@ export function TeamSection({ site }: { site: SiteSummary }) {
       </SkeletonReveal>
 
       {canManage ? (
-        <div className="flex border-t border-border p-5">
+        <div className="flex flex-col gap-2 border-t border-border p-5">
           <Button
             onClick={() => setInviting(true)}
             size="sm"
@@ -498,6 +504,27 @@ export function TeamSection({ site }: { site: SiteSummary }) {
             <PlusIcon className="size-4" />
             Invite a teammate
           </Button>
+          {/* An invitation is an email, and a fresh self-hosted install has
+              nowhere to send one — which used to look like an invite that was
+              sent and never arrived. Shown only to the operator, and only while
+              nothing is stored: they are the one person who can fix it, and
+              anyone else reading this would be told about a screen they cannot
+              open. It stops short of claiming mail is broken, because the api
+              cannot see the worker's relay. */}
+          {deploymentSettings?.editable === true &&
+          deploymentSettings.email?.stored == null ? (
+            <p className="text-xs leading-5 text-muted-foreground">
+              An invitation is an email. If this deployment has no mail
+              transport, it is queued and never delivered —{" "}
+              <a
+                className="underline underline-offset-2 hover:text-foreground"
+                href="/dashboard/account?tab=deployment"
+              >
+                set one up and send yourself a test
+              </a>
+              .
+            </p>
+          ) : null}
         </div>
       ) : null}
 

@@ -176,6 +176,7 @@ export {
 export {
   EMAIL_OUTBOX_TOPIC,
   buildBillingTransferOfferEmailPayload,
+  buildDeploymentTestEmailPayload,
   buildFormNotificationEmailPayload,
   buildInviteEmailPayload,
   buildRapidBurnEmailPayload,
@@ -190,6 +191,18 @@ export {
   type ProcessEmailOutboxDeps,
   type ProcessEmailOutboxResult,
 } from './email-outbox.ts'
+
+export {
+  deploymentSettingAad,
+  parseStoredEmailSettings,
+  resolveStoredAssistantProvider,
+  resolveStoredSecret,
+  resolveStoredSmtpBlock,
+  type DeploymentSettingScopeName,
+  type ResolveStoredSecretDeps,
+  type StoredAssistantProvider,
+  type StoredDeploymentSetting,
+} from './deployment-settings.ts'
 
 /**
  * Telegram notifications (dashboard feedback → the operators' group). The same

@@ -20,12 +20,29 @@ export {
   markOutboxDelivered,
   markOutboxFailed,
   readOutboxBacklog,
+  readOutboxDelivery,
   type ClaimedOutboxRow,
   type OutboxBacklogRow,
+  type OutboxDeliveryRow,
   type EnqueueOutboxInput,
   type EnqueueOutboxResult,
   type MarkOutboxFailedOptions,
 } from './repositories/outbox.ts'
+
+export {
+  clearDeploymentSetting,
+  deploymentOperatorUserId,
+  readDeploymentSetting,
+  writeDeploymentSetting,
+  type DeploymentSettingRow,
+  type WriteDeploymentSettingInput,
+} from './repositories/deployment-settings.ts'
+
+export type {
+  AssistantDeploymentSettings,
+  DeploymentSettingScope,
+  EmailDeploymentSettings,
+} from './schema/deployment-settings.ts'
 
 export {
   OwnershipError,
