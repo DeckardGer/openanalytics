@@ -1087,9 +1087,24 @@ export const keys = {
     send<null>("DELETE", `/v1/sites/${siteId}/keys/${keyId}`),
 };
 
-/** Public, unauthenticated: which sign-in buttons exist on this deployment. */
+/**
+ * Public and unauthenticated: what the login screen is allowed to draw.
+ *
+ * `providers` answers two questions in one read — which doors exist, and
+ * whether this deployment has anybody in it yet. `setup` is the second one's
+ * consequence and is open only while it is true.
+ */
 export const auth = {
-  providers: () => api.get<{ items: AuthProvider[] }>("/v1/auth/providers"),
+  providers: () =>
+    api.get<{ items: AuthProvider[]; setup_required: boolean }>(
+      "/v1/auth/providers"
+    ),
+  /**
+   * Creates the first account and signs the caller in — the api sets the
+   * session cookie on its own response, so there is nothing to store here.
+   */
+  setup: (body: { email: string; password: string; name?: string }) =>
+    send<null>("POST", "/v1/auth/setup", { body }),
 };
 
 export const publicDashboard = {

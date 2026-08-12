@@ -35,7 +35,14 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const OUTPUT = join(ROOT, 'scripts', 'export-public', '.env.example')
+/**
+ * The repository root, which is where this file has always *landed* — it was
+ * written into the export skeleton and overlaid at the root on the way out.
+ * With the export gone (ADR-0062) that indirection has no second half: the
+ * skeleton directory does not exist here, so `pnpm run verify` failed on a
+ * fresh clone at the one step CONTRIBUTING tells a contributor to run.
+ */
+const OUTPUT = join(ROOT, '.env.example')
 const WEB_DIR = join(ROOT, 'apps', 'web')
 
 const { describeEnvSurface, POLICY_SCOPE } = await import('../packages/domain/dist/index.js').catch(
@@ -150,9 +157,9 @@ const HINTS = {
   AUTH_TRUSTED_ORIGINS:
     'Comma-separated. The browser origins allowed to hold a session; the CORS and CSRF boundary.',
   AUTH_PASSWORD_SIGNIN:
-    'Password endpoints are off by default. `pnpm run create-admin` writes an account that needs this set to `enabled` to sign in — turn it back to `disabled` once a mail transport works.',
+    'Password sign-in. Off here, on by default in `infra/selfhost`: it is the door a self-hosted install has that needs neither an OAuth app nor a mail server, and the first-run screen at /login creates the account it signs in with. Not a bootstrap flag to switch back afterwards.',
   AUTH_EMAIL_VERIFICATION:
-    'Leave required. `optional` exists for an install whose mail transport is still broken; `create-admin` already writes a verified account, so most installs never need it.',
+    'Leave required. The first account is written verified — there is no mail to verify it with, which is why it exists — so the usual install never needs this. `optional` is the escape hatch for an install whose transport broke later.',
   RESEND_API_KEY:
     'Hosted email. Leave empty and set the SMTP block instead for a self-hosted install.',
   SMTP_HOST:

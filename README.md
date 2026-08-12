@@ -48,12 +48,20 @@ Architecture rules CI enforces, not conventions:
 every failure mode. Requirements are a Linux host with Docker, four DNS records
 and about 4 GB of RAM.
 
+**Point four names at the host before you start.** Certificates are issued on
+the first boot and issuance fails without them, half an hour after the build
+began and nowhere near the cause:
+
+```
+app.example.com   api.example.com   c.example.com   rt.example.com
+```
+
 ```sh
 git clone https://github.com/OpenLabs-so/openanalytics
 cd openanalytics/infra/selfhost
 ./generate-secrets.sh --domain example.com --email you@example.com
 docker compose up -d
-docker compose --profile tools run --rm create-admin --email you@example.com
+# then open https://app.example.com and create the first account
 ```
 
 To run it from source instead — for development, or to slot the services into

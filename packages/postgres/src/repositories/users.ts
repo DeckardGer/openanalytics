@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { Database } from '../client.ts'
 import { users } from '../schema/auth.ts'
 
@@ -36,6 +36,45 @@ export async function getAuthedUserById(
     .from(users)
     .where(eq(users.id, userId))
   return row ? { ...row, createdAt: new Date(row.createdAt) } : null
+}
+
+/**
+ * Whether this deployment has anybody in it yet.
+ *
+ * The one question the first-run screen turns on: an install with no users has
+ * no way in at all, so `/login` offers to create the first account instead of
+ * asking for one that cannot exist. The moment a row appears the offer is gone
+ * and never comes back — which is what makes an unauthenticated create
+ * endpoint safe to mount.
+ *
+ * `limit 1` and no `count`: the answer is a boolean and the table grows. On a
+ * hosted deployment with a hundred thousand rows this reads one and stops.
+ */
+export async function hasAnyUser(db: Database): Promise<boolean> {
+  const [row] = await db
+    .select({ one: sql<number>`1` })
+    .from(users)
+    .limit(1)
+  return row !== undefined
+}
+
+/**
+ * Mark an address verified without a mail round trip.
+ *
+ * The one thing the first-run account needs that no sign-up flow can do for
+ * it: the account exists *because* mail is not configured, so there is nothing
+ * to send a verification link with, and `requireEmailVerification` would
+ * otherwise refuse it a session forever.
+ *
+ * Gated on the column still being false, so it can only ever move an account
+ * from unverified to verified — never re-open a decision somebody else made,
+ * and never touch a row that is already trusted.
+ */
+export async function markUserEmailVerified(db: Database, email: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ emailVerified: true, updatedAt: new Date() })
+    .where(and(eq(sql`lower(${users.email})`, email.toLowerCase()), eq(users.emailVerified, false)))
 }
 
 /**

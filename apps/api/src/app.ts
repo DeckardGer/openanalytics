@@ -17,7 +17,11 @@ import {
 import type { CredentialVault, ObjectStorage, OpenAiChatClient } from '@openanalytics/integrations'
 import type { Logger, Metrics, ServiceMetadata } from '@openanalytics/observability'
 import { createServiceApp } from '@openanalytics/observability/hono'
-import { resolveOAuthAccessToken, type Database } from '@openanalytics/postgres'
+import {
+  markUserEmailVerified,
+  resolveOAuthAccessToken,
+  type Database,
+} from '@openanalytics/postgres'
 import type { RealtimeCache } from '@openanalytics/redis'
 import { Hono } from 'hono'
 import type { AnalyticsService } from './analytics/service.ts'
@@ -106,6 +110,9 @@ export interface AppDeps {
     /** The anonymous registration ceiling (ADR-0047 D6). */
     readonly registrationRateLimiter?: RateLimiter
   }
+
+  /** The first-account ceiling. Injected only by tests; the default is decided below. */
+  readonly setupRateLimiter?: RateLimiter
   /**
    * The anonymous widget read's budget and its two `max-age` values (ADR-0045,
    * D5 and D12). Optional for the reason `readKey` is: a bare test app should
@@ -269,6 +276,20 @@ function defaultRegistrationLimiter(): RateLimiter {
   return new InProcessRateLimiter({ requestsPerMinute: 10, burst: 20 })
 }
 
+/**
+ * The first-account ceiling: five a minute per address, burst five.
+ *
+ * Far tighter than registration, because the genuine action happens **once per
+ * deployment, ever**. Anything above a couple of attempts is a typo being
+ * retried; anything above five is somebody looking for an install that has
+ * booted and not been claimed yet. It does not close the window — only the
+ * operator creating the account does that — it makes the window expensive to
+ * find by spraying.
+ */
+function defaultSetupLimiter(): RateLimiter {
+  return new InProcessRateLimiter({ requestsPerMinute: 5, burst: 5 })
+}
+
 export function createApp(deps: AppDeps) {
   /**
    * The api's own public origin.
@@ -313,10 +334,26 @@ export function createApp(deps: AppDeps) {
     const auth = deps.auth
     app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw))
 
-    // Which sign-in methods this deployment offers. Registered here, before the
-    // business subtree claims `/${API_VERSION}` behind a blanket session guard:
-    // the login screen asks this question with no session by definition.
-    app.route(`/${API_VERSION}`, createAuthProviderRoutes({ env: deps.env }))
+    // Which sign-in methods this deployment offers, and — on an install nobody
+    // has signed into yet — the route that creates the first account.
+    // Registered here, before the business subtree claims `/${API_VERSION}`
+    // behind a blanket session guard: both are asked with no session, one by
+    // definition and the other because none can exist yet.
+    app.route(
+      `/${API_VERSION}`,
+      createAuthProviderRoutes({
+        env: deps.env,
+        logger: deps.logger,
+        ...(deps.db ? { db: deps.db } : {}),
+        ...(deps.auth ? { auth: deps.auth } : {}),
+        ...(deps.db
+          ? {
+              markVerified: (email: string) => markUserEmailVerified(deps.db as Database, email),
+            }
+          : {}),
+        setupRateLimiter: deps.setupRateLimiter ?? defaultSetupLimiter(),
+      }),
+    )
 
     /**
      * The two OAuth browser pages and the device token exchange (ADR-0043 D13,

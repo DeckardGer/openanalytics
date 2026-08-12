@@ -363,13 +363,29 @@ describe('OpenAPI documents the sign-in methods', () => {
     expect(block).toContain("$ref: '#/components/schemas/AuthProvider'")
   })
 
-  it('enumerates the three doors and never a password form', async () => {
+  it('enumerates every door, including the password form a self-hosted install needs', async () => {
     const text = await spec()
     const block = text.slice(text.indexOf('    AuthProvider:'), text.indexOf('    SiteMember:'))
 
-    expect(block).toContain('enum: [google, github, magic_link]')
-    expect(block).toContain('enum: [oauth, email]')
-    expect(block).not.toContain('password')
+    expect(block).toContain('enum: [google, github, magic_link, password]')
+    expect(block).toContain('enum: [oauth, email, password]')
+    // The condition, not just the value: a password form is offered only where
+    // the deployment turned the endpoints on, which is what stops the list
+    // advertising a door Better Auth never mounted.
+    expect(block).toContain('AUTH_PASSWORD_SIGNIN')
+  })
+
+  it('declares the first-account route as unauthenticated and self-closing', async () => {
+    const text = await spec()
+    const block = text.slice(text.indexOf('  /v1/auth/setup:'), text.indexOf('  /v1/me:'))
+
+    expect(block).toContain('operationId: createFirstAccount')
+    expect(block).toContain('security: []')
+    // The 409 is the guard: one account in existence and this route is closed
+    // for good. A contract that documented only the happy path would let the
+    // guard be dropped without anything failing.
+    expect(block).toContain("'409'")
+    expect(block).toContain("'429'")
   })
 })
 

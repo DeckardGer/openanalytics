@@ -9,7 +9,13 @@ import { Logo } from "@/components/ui/logo";
 import { BrandLoader } from "@/components/ui/brand-loader";
 import { Button } from "@/components/ui/button";
 import { SquircleSurface } from "@/components/ui/squircle-card";
-import { auth, LIVE_API, type AuthProvider } from "@/lib/api";
+import {
+  auth,
+  errorCodeOf,
+  LIVE_API,
+  presentError,
+  type AuthProvider,
+} from "@/lib/api";
 import {
   authClient,
   authErrorFromThrown,
@@ -56,6 +62,18 @@ const panelVariants = {
   center: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -8, transition: { duration: 0.14 } },
 };
+
+/** Mirrors the api's own floor for the first account, so the two cannot disagree. */
+const MIN_PASSWORD_LENGTH = 12;
+
+/**
+ * One text field, worn by four inputs now that the card has a password path.
+ * Hoisted the moment the second one appeared, so the focus ring and the
+ * invalid state cannot drift between the door somebody creates an account with
+ * and the door they come back through.
+ */
+const FIELD_CLASS =
+  "h-10 w-full rounded-xl border border-input bg-white px-3 text-sm outline-none transition-[box-shadow,border-color] placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:[outline:2px_solid_var(--ring)] focus-visible:[outline-offset:-2px] aria-invalid:border-destructive";
 
 /** Good enough to catch a typo before we bother the api. */
 const looksLikeEmail = (value: string) =>
@@ -143,6 +161,12 @@ export function LoginForm({
   const [error, setError] = React.useState<string | null>(null);
   const [resent, setResent] = React.useState(false);
   /**
+   * Shared by the two password paths — creating the first account, and signing
+   * in with one. They never appear together, so one field serves both.
+   */
+  const [password, setPassword] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  /**
    * The provider path's failure, kept apart so it renders under the buttons
    * that caused it rather than beneath the email form.
    *
@@ -173,6 +197,20 @@ export function LoginForm({
   const [available, setAvailable] = React.useState<
     AuthProvider["id"][] | null
   >(null);
+  /**
+   * Whether this deployment has nobody in it yet.
+   *
+   * The same read answers it, because it is the same question asked one level
+   * earlier: not "which door" but "is there anyone behind any of them". True
+   * only on an install that has never been signed into, and it stops being
+   * true the moment the first account exists.
+   *
+   * Degrades to `false` on a failed read, like the provider list degrades to
+   * the full set: the honest failure here is showing a sign-in form to someone
+   * who cannot use it yet, not offering to create an account on a deployment
+   * that already has one.
+   */
+  const [setupRequired, setSetupRequired] = React.useState(false);
   React.useEffect(() => {
     let cancelled = false;
     if (!LIVE_API) {
@@ -186,7 +224,9 @@ export function LoginForm({
     auth
       .providers()
       .then((page) => {
-        if (!cancelled) setAvailable(page.items.map((item) => item.id));
+        if (cancelled) return;
+        setAvailable(page.items.map((item) => item.id));
+        setSetupRequired(page.setup_required);
       })
       .catch(() => {
         // The config read failing must not brick the door — degrade to the
@@ -323,6 +363,92 @@ export function LoginForm({
     void requestLink();
   };
 
+  /**
+   * Claims a deployment that nobody has signed into yet.
+   *
+   * The api sets the session cookie on its own response, so a success needs no
+   * second sign-in call — the onboarding gate takes it from here and sends the
+   * new owner to create their first site.
+   */
+  const claimDeployment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+
+    if (!looksLikeEmail(email.trim())) {
+      setError("Enter an email address we can reach you at.");
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Use a password of at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+
+    setError(null);
+    setBusy(true);
+
+    if (!LIVE_API) {
+      router.push("/dashboard");
+      return;
+    }
+
+    try {
+      await auth.setup({ email: email.trim(), password });
+      // A full navigation, not `router.push`: the session arrived as a cookie
+      // on a response this client did not route through, and the dashboard's
+      // gate has to read it fresh.
+      window.location.assign("/dashboard");
+    } catch (thrown) {
+      setBusy(false);
+      setError(
+        errorCodeOf(thrown) === "SETUP_COMPLETE"
+          ? "Someone has already claimed this deployment. Sign in instead."
+          : presentError(thrown).body
+      );
+      // Re-ask: if it is claimed, the card should stop offering to claim it.
+      auth
+        .providers()
+        .then((page) => setSetupRequired(page.setup_required))
+        .catch(() => {});
+    }
+  };
+
+  /**
+   * Signs in with a password, where the deployment offers one. Self-hosted
+   * installs turn this on by default; the hosted one never does.
+   */
+  const signInWithPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy || working) return;
+
+    if (!looksLikeEmail(email.trim())) {
+      setError("Enter an email address we can reach you at.");
+      return;
+    }
+    setError(null);
+    setBusy(true);
+
+    if (!LIVE_API) {
+      router.push("/dashboard");
+      return;
+    }
+
+    try {
+      const { error: failed } = await authClient.signIn.email({
+        email: email.trim(),
+        password,
+      });
+      if (failed) {
+        setBusy(false);
+        setError(presentAuthError(failed).message);
+        return;
+      }
+      window.location.assign("/dashboard");
+    } catch (thrown) {
+      setBusy(false);
+      setError(authErrorFromThrown(thrown).message);
+    }
+  };
+
   if (standingBy) {
     // The courtesy `SessionGate` extends in the other direction: name where
     // the person is going, rather than showing them a door they are about to
@@ -415,10 +541,14 @@ export function LoginForm({
                   >
                     <div>
                       <h1 className="text-base font-medium tracking-tight">
-                        Welcome back!
+                        {setupRequired
+                          ? "Create the first account"
+                          : "Welcome back!"}
                       </h1>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        Sign in with your account or continue with a provider.
+                        {setupRequired
+                          ? "Nobody has signed into this deployment yet. Whoever claims it first owns it, so do this now."
+                          : "Sign in with your account or continue with a provider."}
                       </p>
                     </div>
 
@@ -437,6 +567,60 @@ export function LoginForm({
                         <span className="h-10 animate-pulse rounded-xl bg-muted-foreground/10" />
                         <span className="h-10 animate-pulse rounded-xl bg-muted-foreground/10" />
                       </div>
+                    ) : setupRequired ? (
+                      /* One face, and no doors beside it. Every provider
+                         button on this deployment leads to an account that
+                         does not exist yet, and offering them here would be
+                         offering to fail. */
+                      <form
+                        className="flex flex-col gap-2"
+                        onSubmit={(event) => void claimDeployment(event)}
+                      >
+                        <input
+                          aria-invalid={error !== null}
+                          aria-label="Email address"
+                          autoComplete="email"
+                          className={FIELD_CLASS}
+                          disabled={busy}
+                          onChange={(event) => {
+                            setEmail(event.target.value);
+                            setError(null);
+                          }}
+                          placeholder="you@company.com"
+                          type="email"
+                          value={email}
+                        />
+                        <input
+                          aria-invalid={error !== null}
+                          aria-label="Password"
+                          autoComplete="new-password"
+                          className={FIELD_CLASS}
+                          disabled={busy}
+                          minLength={MIN_PASSWORD_LENGTH}
+                          onChange={(event) => {
+                            setPassword(event.target.value);
+                            setError(null);
+                          }}
+                          placeholder={`Password, ${MIN_PASSWORD_LENGTH}+ characters`}
+                          type="password"
+                          value={password}
+                        />
+                        <Button className="w-full" loading={busy} type="submit">
+                          {busy ? "Creating account" : "Create account"}
+                        </Button>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          You can add Google, GitHub or a magic link afterwards,
+                          from Settings.
+                        </p>
+                        {error ? (
+                          <p
+                            className="text-xs text-destructive-foreground"
+                            role="alert"
+                          >
+                            {error}
+                          </p>
+                        ) : null}
+                      </form>
                     ) : (
                       <>
                         {offers("google") || offers("github") ? (
@@ -497,7 +681,7 @@ export function LoginForm({
                               aria-invalid={error !== null}
                               aria-label="Email address"
                               autoComplete="email"
-                              className="h-10 w-full rounded-xl border border-input bg-white px-3 text-sm outline-none transition-[box-shadow,border-color] placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:[outline:2px_solid_var(--ring)] focus-visible:[outline-offset:-2px] aria-invalid:border-destructive"
+                              className={FIELD_CLASS}
                               disabled={working}
                               onChange={(event) => {
                                 setEmail(event.target.value);
@@ -515,6 +699,58 @@ export function LoginForm({
                               {phase === "sending"
                                 ? "Sending link"
                                 : "Email me a link"}
+                            </Button>
+                          </form>
+                        ) : null}
+
+                        {/* The password door, where the deployment offers one.
+                            Last, and quietly: it is the fallback for an install
+                            with no mail and no OAuth app, not the way anybody
+                            should be encouraged to sign in. The address field
+                            above is reused, so this adds one input rather than
+                            a second form asking for the same thing. */}
+                        {offers("password") ? (
+                          <form
+                            className="flex flex-col gap-2"
+                            onSubmit={(event) => void signInWithPassword(event)}
+                          >
+                            {offers("magic_link") ? null : (
+                              <input
+                                aria-invalid={error !== null}
+                                aria-label="Email address"
+                                autoComplete="email"
+                                className={FIELD_CLASS}
+                                disabled={busy}
+                                onChange={(event) => {
+                                  setEmail(event.target.value);
+                                  setError(null);
+                                }}
+                                placeholder="you@company.com"
+                                type="email"
+                                value={email}
+                              />
+                            )}
+                            <input
+                              aria-invalid={error !== null}
+                              aria-label="Password"
+                              autoComplete="current-password"
+                              className={FIELD_CLASS}
+                              disabled={busy}
+                              onChange={(event) => {
+                                setPassword(event.target.value);
+                                setError(null);
+                              }}
+                              placeholder="Password"
+                              type="password"
+                              value={password}
+                            />
+                            <Button
+                              className="w-full"
+                              loading={busy}
+                              type="submit"
+                              variant="secondary"
+                            >
+                              {busy ? "Signing in" : "Sign in with password"}
                             </Button>
                           </form>
                         ) : null}

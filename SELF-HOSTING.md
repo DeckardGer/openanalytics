@@ -94,10 +94,28 @@ compose file and is not cosmetic:
 Re-running `docker compose up -d` after a `git pull` is the upgrade path. Both
 migration runners keep a ledger and apply only what is pending.
 
-### 4. Sign in for the first time
+### 4. Claim it
 
-The front doors are OAuth and a magic link, and **both need something
-configured**:
+Open `https://app.<domain>`. A deployment nobody has signed into yet does not
+ask you to sign in — it offers to **create the first account**, with an email
+address and a password, and signs you in the moment you do.
+
+**Do this immediately.** The offer is open to whoever asks first, and your four
+DNS records are public. It closes permanently the instant one account exists:
+from then on the same screen is an ordinary sign-in, and the route behind it
+answers `409` forever. There is no flag to turn off afterwards.
+
+The address is recorded as verified, because the account exists precisely
+because no mail transport is configured and there is nothing to verify it with.
+That is also what makes it the _same_ account later: configure a provider or a
+mail transport, sign in with the same address, and you land here rather than on
+a second account.
+
+Password sign-in stays available afterwards — `AUTH_PASSWORD_SIGNIN=enabled`,
+which `generate-secrets.sh` writes into `env/api.env` for you. It is a normal
+door for an install that runs on its owner's hardware, not a bootstrap flag.
+
+**The two other doors, once you want them:**
 
 - **OAuth** — register an app with Google or GitHub, set the callback to
   `https://api.<domain>/api/auth/callback/google` (or `/github`), and put the id
@@ -113,27 +131,11 @@ configured**:
   the variables that are missing. `SMTP_HOST` alone is enough to activate SMTP;
   the rest of the block defaults to port 587 with STARTTLS, no credential, and
   `EMAIL_FROM` as the sender.
-- **Neither yet** — bootstrap the first account directly:
 
-  ```sh
-  docker compose run --rm create-admin --email you@example.com
-  ```
-
-  It prints a generated password once — copy it, because nothing stores it. Set
-  `ADMIN_PASSWORD` in the environment instead if you would rather choose one;
-  prefer that over `--password`, which is visible in the host's process list.
-
-  The account it writes is verified, because the premise of needing it is that
-  mail does not work yet. It never overwrites an existing account: run it twice
-  for the same address and the second run refuses and changes nothing.
-
-  **It is not by itself a way in.** The sign-in page offers the three providers
-  above and has no password field, so no browser can send the password it
-  prints; `AUTH_PASSWORD_SIGNIN=enabled` in `env/api.env` mounts the api's
-  password endpoints for an API client and changes nothing in the dashboard.
-  What the account is worth is that the address exists and is already verified:
-  configure OAuth or mail, sign in with the same address, and you land on this
-  account instead of a second one.
+`docker compose run --rm create-admin --email you@example.com` still exists and
+still works. It predates the first-run screen and is now the tool for the case
+that screen cannot serve: writing an account on a deployment that already has
+one, from the host, with no browser.
 
 ### 5. Add a site and check the pipeline
 
@@ -319,7 +321,7 @@ feature it has not enabled.
 
 | Missing                                                | What breaks                                                                                                                                                             |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mail transport (`RESEND_API_KEY` / SMTP) on the worker | **Magic-link sign-in cannot complete**; invitations never arrive. Mail goes to the log. Use `create-admin` to bootstrap.                                                |
+| Mail transport (`RESEND_API_KEY` / SMTP) on the worker | **Magic-link sign-in cannot complete**; invitations never arrive. Nothing is sent and the link is written nowhere. Sign in with the account the first-run screen made.  |
 | `AUTH_TRUSTED_ORIGINS` on the api                      | **Every browser call from the dashboard is refused.** No `Access-Control-Allow-Origin` is emitted at all — fail-closed by design.                                       |
 | `APP_BASE_URL` on the api                              | Human-facing links (invitation acceptance, billing returns) point at pages the api does not serve.                                                                      |
 | `GOOGLE_*` / `GITHUB_*`                                | No Google/GitHub button. A provider appears only when both its id and secret are present.                                                                               |

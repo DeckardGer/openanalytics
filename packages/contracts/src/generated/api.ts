@@ -48,15 +48,57 @@ export interface paths {
          *     so a deployment with no GitHub OAuth app does not offer a GitHub button
          *     that can only end on a provider error page.
          *
-         *     Email+password is never listed. Those endpoints stay mounted for the test
-         *     harness — an OAuth consent screen cannot be driven from a test — but the
-         *     product decision of 2026-07-26 is that the doors are Google, GitHub and
-         *     the magic link, each of which creates or signs in to an account with no
-         *     separate sign-up screen.
+         *     `setup_required` answers the other question the same screen has to ask:
+         *     whether this deployment has anybody in it yet. When it is true the screen
+         *     offers to create the first account instead of asking for one that cannot
+         *     exist, and `POST /v1/auth/setup` is open. It goes false the moment an
+         *     account exists and never goes true again.
          */
         get: operations["listAuthProviders"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create the first account on a deployment that has none.
+         * @description The way into a fresh self-hosted install, and the only route on this api
+         *     that both writes and accepts no credential.
+         *
+         *     **The guard is the emptiness of the users table.** With one account in
+         *     existence this answers `409` and keeps answering it forever, so the route
+         *     closes itself — there is no flag to turn off afterwards and no window a
+         *     misconfiguration can re-open.
+         *
+         *     The address is marked verified, because the account exists precisely
+         *     because no mail transport is configured and there is nothing to verify it
+         *     with. That is also what makes it the same account later: configure OAuth
+         *     or SMTP, sign in with the same address, and you land on this account
+         *     rather than a second one.
+         *
+         *     A successful call returns the session cookie, so the caller is signed in
+         *     and goes straight to creating their first site.
+         *
+         *     **Known window.** Between the first successful boot and this call, anyone
+         *     who can reach the api can claim the deployment. It is rate-limited and
+         *     logged with the claiming address, and SELF-HOSTING says to do it first.
+         *     A setup token printed to the log was considered and rejected: it puts the
+         *     operator back to reading logs, which is the step this route exists to
+         *     remove.
+         */
+        post: operations["createFirstAccount"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4612,14 +4654,21 @@ export interface components {
         };
         AuthProvider: {
             /** @enum {string} */
-            id: "google" | "github" | "magic_link";
+            id: "google" | "github" | "magic_link" | "password";
             /**
              * @description `oauth` redirects to the provider; `email` collects an address and
-             *     sends a link. The frontend needs the distinction to know which of the
-             *     two interaction shapes to render.
+             *     sends a link; `password` collects an address and a password. The
+             *     frontend needs the distinction to know which interaction shape to
+             *     render.
+             *
+             *     `password` appears only where `AUTH_PASSWORD_SIGNIN` is enabled,
+             *     which is the same condition that decides whether the endpoints are
+             *     mounted at all. It is off on the hosted deployment and on by default
+             *     for a self-hosted one, where it is frequently the only door that
+             *     needs no third-party account and no mail server.
              * @enum {string}
              */
-            kind: "oauth" | "email";
+            kind: "oauth" | "email" | "password";
         };
         /**
          * @description A member of the site. `email` and `name` are returned to a caller who is
@@ -7966,8 +8015,69 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["AuthProvider"][];
+                        /**
+                         * @description True when this deployment has no accounts at all. Always
+                         *     false where the api has no auth database to ask.
+                         */
+                        setup_required: boolean;
                     };
                 };
+            };
+        };
+    };
+    createFirstAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    password: string;
+                    /** @description Optional. Defaults to the local part of the address. */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The account was created and the caller is signed in. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The address or the password was rejected. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description This deployment already has an account. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too many attempts from this address. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description This deployment has no auth database. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

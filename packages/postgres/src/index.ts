@@ -317,6 +317,8 @@ export {
 export {
   getAuthedUserById,
   getUserPreferences,
+  hasAnyUser,
+  markUserEmailVerified,
   setUserTimezone,
   type AuthedUserRow,
   type SetUserTimezoneInput,
