@@ -183,6 +183,22 @@ from. A deployment that would rather keep its configuration in files can set
 `DEPLOYMENT_SETTINGS=disabled` on both the api and the worker, and the screen
 never appears.
 
+If a stored password ever stops being readable — the keyring was rotated without
+keeping the old version, say — the worker logs
+`deployment_setting_secret_unreadable` and **falls back to the environment** for
+that send rather than trying the relay without a credential. Mail keeps moving;
+re-enter the password on the settings screen to go back to the stored relay.
+
+> **Set `DEPLOYMENT_SETTINGS` on both services, and delete the rows before you
+> turn it off.** They are two independent variables and nothing reconciles them.
+> With it enabled on the api and disabled on the worker, you can save a relay
+> that is never delivered through. With it disabled on the api and enabled on
+> the worker, the screen disappears but **the worker keeps preferring whatever
+> is already stored** — turning the feature off does not remove the row. To go
+> back to configuring mail and the assistant from files, clear the settings in
+> the dashboard first (which returns the deployment to its environment), then
+> set `DEPLOYMENT_SETTINGS=disabled` on both and recreate them.
+
 ### 6. Add a site and check the pipeline
 
 Create a site in the dashboard, paste the snippet it gives you, then:

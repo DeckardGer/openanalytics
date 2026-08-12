@@ -334,9 +334,17 @@ const serviceSchemas = {
     // The worker's half of the dashboard-configurable settings (migration 0043;
     // the api's schema above carries the full argument). `enabled` makes the
     // email drain prefer the stored transport over `SMTP_*`/`RESEND_API_KEY`;
-    // `disabled` makes it read the environment and nothing else. Both services
-    // must agree, or the api would write a relay the worker never delivers
-    // through.
+    // `disabled` makes it read the environment and nothing else.
+    //
+    // **Both services must agree, and nothing here reconciles them** — they are
+    // two variables in two containers, sharing only a default. The asymmetry is
+    // worth stating because only one direction is obvious: api enabled with the
+    // worker disabled writes a relay that is never delivered through, which
+    // fails visibly at the test send. The other direction is quiet — api
+    // disabled with the worker enabled removes the *screen* while leaving the
+    // *row*, and the worker goes on preferring it over the environment, because
+    // turning the feature off has never been the same act as clearing what it
+    // stored. SELF-HOSTING.md says to clear the settings before disabling.
     DEPLOYMENT_SETTINGS: z.enum(['enabled', 'disabled']).default('enabled'),
     // Native Redis/TLS consumer group; REST cannot do a blocking XREADGROUP.
     EVENT_STREAM_REDIS_URL: url.optional(),
