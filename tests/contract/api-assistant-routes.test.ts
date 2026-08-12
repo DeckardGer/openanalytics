@@ -412,6 +412,7 @@ describe('the quota is checked before, and charged at accept (D5)', () => {
     )
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
+      available: true,
       window_hours: 24,
       limit: 20,
       used: 3,
@@ -421,6 +422,19 @@ describe('the quota is checked before, and charged at accept (D5)', () => {
       retry_after_seconds: null,
     })
     expect(questionCharges).toEqual([])
+  })
+
+  it('reports the assistant as unavailable where no provider is configured', async () => {
+    // The dashboard asks this before it draws the chat control. Without it a
+    // self-hosted install with no `OPENAI_API_KEY` offered a button whose only
+    // outcome was the `SERVICE_UNAVAILABLE` the questions route already
+    // answers honestly.
+    const app = buildApp({})
+    const res = await app.fetch(
+      new Request('http://api.test/v1/assistant/usage', { headers: { cookie: COOKIE } }),
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()).available).toBe(false)
   })
 
   it('reports remaining 0 rather than a negative when the limit was lowered under a spent window', async () => {

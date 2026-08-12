@@ -200,6 +200,7 @@ describe('the client may send exactly two roles (D7)', () => {
 describe('the usage report is the ledger’s own numbers (D5)', () => {
   it('requires every field, so a client never has to guess an absent one', () => {
     const usage: components['schemas']['AssistantUsage'] = {
+      available: true,
       window_hours: 24,
       limit: 20,
       used: 3,
@@ -212,6 +213,11 @@ describe('the usage report is the ledger’s own numbers (D5)', () => {
 
     const block = schemaBlock('AssistantUsage')
     for (const field of [
+      // `available` first, because it is the field a client must consult
+      // before it draws anything: a deployment with no model provider answers
+      // `SERVICE_UNAVAILABLE` to every question, and a control offered on top
+      // of that is a button whose only outcome is an error.
+      'available',
       'window_hours',
       'limit',
       'used',

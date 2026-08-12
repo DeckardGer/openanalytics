@@ -10995,6 +10995,7 @@ components:
       type: object
       additionalProperties: false
       required:
+        - available
         - window_hours
         - limit
         - used
@@ -11011,6 +11012,14 @@ components:
         and `used` may exceed it. Reporting the real count rather than clamping it
         is what makes the ledger answer "how much is this being used" honestly.
       properties:
+        available:
+          type: boolean
+          description: |
+            Whether this deployment has a model provider configured at all. False
+            where `OPENAI_API_KEY` is unset — the routes stay mounted and answer
+            `SERVICE_UNAVAILABLE`, so a caller who asks is told why, but a client
+            should ask this first and render the assistant as unavailable rather
+            than offering a control whose only outcome is an error.
         window_hours:
           type: integer
           minimum: 1

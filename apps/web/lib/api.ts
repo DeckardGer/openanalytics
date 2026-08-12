@@ -614,6 +614,8 @@ export const connectedApps = {
 
 /* Assistant ---------------------------------------------------------------- */
 
+export type AssistantUsage = Schemas["AssistantUsage"];
+
 /** One turn of the conversation the client keeps (the server stores none). */
 export type AssistantTurn = {
   role: "user" | "assistant";
@@ -749,6 +751,16 @@ export const assistant = {
     }
     return done;
   },
+  /**
+   * The caller's spend over the rolling window — and, in `available`, whether
+   * this deployment has a model provider at all.
+   *
+   * The dashboard asks this before it draws the chat control. A self-hosted
+   * install with no `OPENAI_API_KEY` used to be offered a button whose only
+   * outcome was an error; the api was already answering honestly, nothing was
+   * asking it.
+   */
+  usage: () => api.get<AssistantUsage>("/v1/assistant/usage"),
 };
 
 /**

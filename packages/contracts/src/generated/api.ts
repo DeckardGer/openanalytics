@@ -7529,6 +7529,14 @@ export interface components {
          */
         AssistantUsage: {
             /**
+             * @description Whether this deployment has a model provider configured at all. False
+             *     where `OPENAI_API_KEY` is unset — the routes stay mounted and answer
+             *     `SERVICE_UNAVAILABLE`, so a caller who asks is told why, but a client
+             *     should ask this first and render the assistant as unavailable rather
+             *     than offering a control whose only outcome is an error.
+             */
+            available: boolean;
+            /**
              * @description The width of the rolling window, in hourly buckets. `24` today; it is
              *     reported rather than assumed so a client never hardcodes "per day".
              */

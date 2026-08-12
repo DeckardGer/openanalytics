@@ -198,6 +198,44 @@ export function TabBar() {
   const [dir, setDir] = React.useState(1);
   const itemRefs = React.useRef<(HTMLElement | null)[]>([]);
 
+  /**
+   * Whether this deployment has a model provider at all.
+   *
+   * Asked before the chat control is drawn, on the usage read the api already
+   * serves. A self-hosted install with no `OPENAI_API_KEY` was offered a button
+   * whose only outcome was an error — the api answered honestly the whole time,
+   * nothing asked it. Optimistic while the answer is in flight, so the control
+   * does not flicker from enabled to disabled on every deployment that has one.
+   */
+  const [assistantReady, setAssistantReady] = React.useState(true);
+  React.useEffect(() => {
+    if (!LIVE_API) return;
+    let cancelled = false;
+    assistant
+      .usage()
+      .then((usage) => {
+        if (!cancelled) setAssistantReady(usage.available);
+      })
+      .catch(() => {
+        // A failed read is not an answer. Leave the control as it is and let
+        // the ask itself report the real problem.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * What the hover pill says. Every anchor but one is a fixed name; the chat
+   * control's changes with the deployment, because an operator hovering a
+   * dimmed button is asking exactly one question and this is where to answer
+   * it.
+   */
+  const tipLabel =
+    tip === CHAT_INDEX && !assistantReady
+      ? "Add an OpenAI key in Settings"
+      : TOOLTIP_LABELS[tip];
+
   const [surface, setSurface] = React.useState<Surface>("none");
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [draft, setDraft] = React.useState("");
@@ -533,11 +571,11 @@ export function TabBar() {
                 custom={dir}
                 exit="exit"
                 initial="enter"
-                key={TOOLTIP_LABELS[tip]}
+                key={tipLabel}
                 transition={SPRING}
                 variants={labelVariants}
               >
-                {TOOLTIP_LABELS[tip]}
+                {tipLabel}
               </motion.span>
             </AnimatePresence>
           </motion.div>
@@ -747,10 +785,26 @@ export function TabBar() {
 
                   <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-white/10" />
 
+                  {/* Drawn either way, dimmed and inert without a provider.
+                      Hiding it would leave a self-hosted operator with no idea
+                      the product has an assistant; a live button with nothing
+                      behind it is worse. The hover pill carries the reason, so
+                      the answer is where the question is asked. */}
                   <button
-                    aria-label="AI Chat"
-                    className="relative flex cursor-pointer items-center rounded-full p-[9px] text-primary outline-none transition-colors duration-300 ease-out hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring active:scale-95"
+                    aria-disabled={!assistantReady}
+                    aria-label={
+                      assistantReady
+                        ? "AI Chat"
+                        : "AI Chat — add an OpenAI key in Settings to enable it"
+                    }
+                    className={cn(
+                      "relative flex items-center rounded-full p-[9px] outline-none transition-colors duration-300 ease-out focus-visible:ring-2 focus-visible:ring-ring",
+                      assistantReady
+                        ? "cursor-pointer text-primary hover:bg-primary/15 active:scale-95"
+                        : "cursor-not-allowed text-primary/35",
+                    )}
                     onClick={() => {
+                      if (!assistantReady) return;
                       setHovered(null);
                       setSurface("chat");
                     }}

@@ -281,6 +281,19 @@ export function createAssistantRoutes(deps: AssistantRoutesDeps): Hono<Env> {
     return {
       window,
       body: {
+        /**
+         * Whether this deployment has a model provider at all.
+         *
+         * The routes stay mounted without one and answer `SERVICE_UNAVAILABLE`
+         * naming the cause, which is right for a caller who asks — an
+         * unmounted `/v1` path answers `401` and a browser renders that as
+         * "you are signed out". But the dashboard drew its chat control
+         * unconditionally, so a self-hosted install with no `OPENAI_API_KEY`
+         * offered a button whose only outcome was an error. This is the
+         * question it should have been asking first, on the read it already
+         * makes.
+         */
+        available: deps.client !== undefined,
         window_hours: ASSISTANT_USAGE_WINDOW_HOURS,
         limit,
         used: window.used,
