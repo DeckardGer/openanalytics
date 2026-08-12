@@ -2,17 +2,18 @@
 /**
  * Credential scan over the tracked tree (ADR-0062 § c).
  *
- * ## Why this exists separately from `export-public.mjs`
+ * ## Why this exists
  *
- * Until 2026-08-12 nothing reached the public repository except through
- * `scripts/export-public.mjs`, whose verify half greps the tree for credential
- * shapes before anything is published. ADR-0062 ends the export, so that net
- * disappears from the only path that had one: after it, code reaches the public
- * repository by being merged there.
+ * Until 2026-08-12 nothing reached this repository except through an export
+ * script in the private one, whose verify half grepped the tree for credential
+ * shapes before anything was published. (That script is not here and never was
+ * — it is the thing this replaces.) ADR-0062 ends the export, so that net
+ * disappears from the only path that had one: after it, code reaches this
+ * repository by being merged here.
  *
  * This is the same net, moved to where the traffic now goes — a pre-merge check
- * on the **public** repository, which is why it lives in the tree rather than in
- * the export script, and why it has no dependencies and needs no install.
+ * on this repository, which is why it lives in the tree a contributor can read
+ * and run, and why it has no dependencies and needs no install.
  *
  * ## What it does and does not carry over
  *

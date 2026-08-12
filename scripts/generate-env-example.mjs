@@ -25,7 +25,7 @@
  * ## Usage
  *
  *   pnpm run build          # reads the built domain package
- *   pnpm run env:example    # writes scripts/export-public/.env.example
+ *   pnpm run env:example    # writes .env.example at the repository root
  *   pnpm run env:example:check   # fails if the committed file is stale (CI)
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -622,7 +622,7 @@ if (process.argv.includes('--check')) {
   }
   if (current !== content) {
     process.stderr.write(
-      'generate-env-example: scripts/export-public/.env.example is stale.\n' +
+      `generate-env-example: ${OUTPUT} is stale.\n` +
         '  An environment variable changed and the template did not. Run `pnpm run env:example`.\n',
     )
     process.exit(1)
