@@ -367,11 +367,12 @@ describe('the test send', () => {
     expect(queued.payload['kind']).toBe('deployment_test')
   })
 
-  it('reports the relay’s categorized reason, and only for its own topic', async () => {
+  it('reports the relay’s categorized reason, and only for its own sends', async () => {
     const app = buildApp()
     world.delivery = {
       id: 'outbox-1',
       topic: 'email.send',
+      kind: 'deployment_test',
       status: 'pending',
       attempts: 1,
       lastError: 'unauthorized',
@@ -390,9 +391,40 @@ describe('the test send', () => {
     const foreign = await call(app, 'GET', '/v1/deployment/settings/email/test/outbox-1', {
       user: OPERATOR,
     })
-    // The topic check is what keeps this from being a status endpoint over every
-    // message the deployment has ever sent.
+    // A topic this route does not serve at all.
     expect(foreign.status).toBe(404)
+  })
+
+  /**
+   * The check the topic cannot make.
+   *
+   * Every email this deployment sends shares the topic `email.send` — a magic
+   * link, an invitation and a verification are all queued under it — so a route
+   * that matched on the topic alone would answer for a *sign-in link's* delivery
+   * row. The kind is what separates them, and `deployment_test` is the only one
+   * this route serves.
+   *
+   * The response would disclose no address and no link even then, which is why
+   * this is a narrowing rather than a breach being closed. It is still the guard
+   * the comment beside it claims, which is the point.
+   */
+  it('refuses an outbox id that is a different kind of email', async () => {
+    const app = buildApp()
+    for (const kind of ['magic_link', 'invite', 'verification', null]) {
+      world.delivery = {
+        id: 'outbox-1',
+        topic: 'email.send',
+        kind,
+        status: 'delivered',
+        attempts: 1,
+        lastError: null,
+        deliveredAt: new Date('2026-08-12T00:00:00.000Z'),
+      }
+      const res = await call(app, 'GET', '/v1/deployment/settings/email/test/outbox-1', {
+        user: OPERATOR,
+      })
+      expect(res.status, `kind ${String(kind)} must not be readable here`).toBe(404)
+    }
   })
 
   it('refuses a caller who is not the operator', async () => {

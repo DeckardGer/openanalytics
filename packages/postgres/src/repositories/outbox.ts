@@ -129,6 +129,20 @@ export async function readOutboxBacklog(db: Database): Promise<OutboxBacklogRow[
 export interface OutboxDeliveryRow {
   readonly id: string
   readonly topic: string
+  /**
+   * The payload's `kind`, and deliberately nothing else from the payload.
+   *
+   * Every email this deployment sends shares one topic (`email.send`), so the
+   * topic cannot tell a test send from a sign-in link — the `kind` can, and a
+   * caller that serves one kind can refuse the rest. It is extracted here rather
+   * than by handing the payload out, because the payload also holds the
+   * recipient, the subject and the body, and none of those has any business
+   * leaving this function.
+   *
+   * `null` when the payload is not an object or names no kind, which is a row no
+   * caller should match on.
+   */
+  readonly kind: string | null
   readonly status: OutboxStatus
   readonly attempts: number
   /** The categorized reason a transport reported. Never a raw provider body —
@@ -143,9 +157,17 @@ export interface OutboxDeliveryRow {
  *
  * The read behind "did my test email arrive?". Nothing else needs it: delivery
  * is otherwise a fire-and-forget side effect whose failures belong in the
- * worker's logs, and a general status endpoint over the outbox would be a way to
- * enumerate every message this deployment has ever sent. The caller checks the
- * topic before answering, so an id from any other topic reads as "not found".
+ * worker's logs.
+ *
+ * `topic` and `kind` are both returned so the caller can refuse anything it does
+ * not serve. Both, because neither is sufficient alone: every email in this
+ * system shares the topic `email.send`, so the topic separates mail from future
+ * non-mail topics and the `kind` separates a test send from a sign-in link.
+ *
+ * What this row deliberately does **not** carry is the payload itself — no
+ * recipient, no subject, no body — so even a row a caller matches discloses only
+ * whether it was delivered and, if not, the reason a transport had already
+ * categorized.
  */
 export async function readOutboxDelivery(
   db: Database,
@@ -155,6 +177,7 @@ export async function readOutboxDelivery(
     .select({
       id: outbox.id,
       topic: outbox.topic,
+      payload: outbox.payload,
       status: outbox.status,
       attempts: outbox.attempts,
       lastError: outbox.lastError,
@@ -163,7 +186,18 @@ export async function readOutboxDelivery(
     .from(outbox)
     .where(eq(outbox.id, id))
   if (!row) return null
-  return { ...row, deliveredAt: row.deliveredAt ? new Date(row.deliveredAt) : null }
+  const { payload, ...rest } = row
+  const kind =
+    typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+      ? ((payload as Record<string, unknown>)['kind'] ?? null)
+      : null
+  return {
+    ...rest,
+    // Destructured out above and never spread, so no future field added to the
+    // payload can reach a response by being carried along.
+    kind: typeof kind === 'string' ? kind : null,
+    deliveredAt: rest.deliveredAt ? new Date(rest.deliveredAt) : null,
+  }
 }
 
 export async function markOutboxDelivered(db: Database, id: string): Promise<void> {

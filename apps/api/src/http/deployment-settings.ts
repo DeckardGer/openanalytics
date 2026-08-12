@@ -401,9 +401,17 @@ export function createDeploymentSettingsRoutes(deps: DeploymentSettingsDeps): Ho
     await requireOperator(user.id)
 
     const row = await readOutboxDelivery(db, c.req.param('id'))
-    // The topic check is what keeps this from being a status endpoint over every
-    // message the deployment has ever sent.
-    if (row === null || row.topic !== EMAIL_OUTBOX_TOPIC) {
+    // The topic **and** the kind, because the topic alone is not the filter it
+    // looks like: `EMAIL_OUTBOX_TOPIC` is `email.send`, which is what an
+    // invitation, a magic link and a verification are queued under as well, so a
+    // topic check would leave this a status endpoint over every message the
+    // deployment has ever emailed. `kind` is what separates them, and
+    // `deployment_test` is the only one this route serves.
+    //
+    // Kept as two checks rather than collapsing to the kind: the topic is what
+    // says "this id belongs to mail at all", and a future non-mail topic that
+    // happened to use the same kind string should not land here.
+    if (row === null || row.topic !== EMAIL_OUTBOX_TOPIC || row.kind !== 'deployment_test') {
       throw new ApiError('NOT_FOUND', 'No test send with that id')
     }
 
