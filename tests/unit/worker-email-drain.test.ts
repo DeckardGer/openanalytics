@@ -85,7 +85,13 @@ const KEYRING = JSON.stringify({
 
 /** `readDeploymentSetting`'s chain, and nothing else: a drain that grew a
  * second query against this stub would fail here rather than pass by accident. */
-const dbWithSetting = (settings: Record<string, unknown> | null) =>
+const dbWithSetting = (
+  settings: Record<string, unknown> | null,
+  secret: { encryptedSecret: string | null; keyVersion: string | null } = {
+    encryptedSecret: null,
+    keyVersion: null,
+  },
+) =>
   ({
     select: () => ({
       from: () => ({
@@ -96,8 +102,7 @@ const dbWithSetting = (settings: Record<string, unknown> | null) =>
                 {
                   scope: 'email',
                   settings,
-                  encryptedSecret: null,
-                  keyVersion: null,
+                  ...secret,
                   secretLast4: '',
                   updatedByUserId: null,
                   updatedAt: new Date('2026-08-12T00:00:00.000Z'),
@@ -188,5 +193,67 @@ describe('stored mail settings', () => {
     expect(captured.find('deployment_settings_not_readable')).toHaveLength(1)
     const line = captured.find('email_transport_selected')[0] as Record<string, unknown>
     expect(line['source']).toBe('environment')
+  })
+
+  /**
+   * A stored password this build cannot decrypt.
+   *
+   * The keyring is fine, the row is fine, and the ciphertext is not — a ring
+   * rotated without keeping the old version is the ordinary way to get here.
+   *
+   * The transport must fall back to the environment, and the reason is worth
+   * keeping in front of whoever changes this next: the alternative is not "a
+   * visible error", it is dead mail. A block returned without its password
+   * makes nodemailer offer no AUTH, the relay answers 535, and the outbox
+   * classifies that `unauthorized` — which is not retryable, so the message,
+   * including a sign-in link, is gone. The row's own settings are unchanged and
+   * one log line says exactly what happened, so nothing about this is silent.
+   */
+  it('falls back to the environment when the stored password will not decrypt', async () => {
+    const captured = createCapturedLogger()
+    const drain = startEmailDrain({
+      // Well-formed enough to reach the vault and wrong enough to fail its tag:
+      // a real key version, a real nonce length, and a payload that is not the
+      // ciphertext that version wrote.
+      db: dbWithSetting(
+        { host: 'stored-relay.example', port: 587, secure: false, user: 'postmaster' },
+        { encryptedSecret: `k1.${'A'.repeat(16)}.${'B'.repeat(64)}`, keyVersion: 'k1' },
+      ),
+      env: workerEnv({
+        DEPLOYMENT_SETTINGS: 'enabled',
+        OA_CREDENTIAL_KEYRING: KEYRING,
+        SMTP_HOST: 'env-relay.example',
+      }),
+      logger: captured.logger,
+    })
+    await drain.stop()
+
+    expect(captured.find('deployment_setting_secret_unreadable')).toHaveLength(1)
+    const line = captured.find('email_transport_selected')[0] as Record<string, unknown>
+    expect(line['transport']).toBe('smtp')
+    expect(line['source']).toBe('environment')
+  })
+
+  /**
+   * The control for the test above, and the line the fallback must not cross.
+   *
+   * A row with a host and **no** ciphertext is a complete configuration — an
+   * SMTP relay on the same host frequently wants no credential at all — so it
+   * still wins over the environment. "No secret stored" and "a stored secret
+   * that will not come back" are different rows, and only the second one gives
+   * up its claim.
+   */
+  it('still prefers a stored relay that deliberately has no password', async () => {
+    const line = await bootWith(
+      workerEnv({
+        DEPLOYMENT_SETTINGS: 'enabled',
+        OA_CREDENTIAL_KEYRING: KEYRING,
+        SMTP_HOST: 'env-relay.example',
+      }),
+      dbWithSetting({ host: 'stored-relay.example', port: 25, secure: false }),
+    )
+
+    expect(line['transport']).toBe('smtp')
+    expect(line['source']).toBe('database')
   })
 })

@@ -103,17 +103,41 @@ export function resolveStoredSecret(deps: ResolveStoredSecretDeps): string | und
 /**
  * The stored transport as `selectEmailTransport` wants it, password included.
  *
- * `null` when the row does not describe a transport. A row that names a host but
- * whose password will not decrypt still returns the block, without the
- * credential — nodemailer then offers no AUTH, the relay refuses, and the outbox
- * records `unauthorized`. That is a better failure than silently reverting to
- * the environment's relay, which would deliver the operator's mail through a
- * host they thought they had replaced.
+ * `null` — meaning "fall back to the environment" — in two cases, and the second
+ * one is the subtle half:
+ *
+ * - the row does not describe a transport at all (no host);
+ * - **the row stores a credential this build cannot read.** An unreadable
+ *   ciphertext is not a transport minus a password, it is a transport we do not
+ *   have, so the caller is told there is nothing here rather than being handed a
+ *   block that cannot authenticate.
+ *
+ * A row that stores *no* ciphertext still returns its block: an SMTP relay on
+ * the same host frequently wants no credential at all, and that is a complete
+ * configuration rather than a broken one.
+ *
+ * The second case used to return the block without the credential, on the
+ * argument that reverting to the environment would deliver the operator's mail
+ * through a host they thought they had replaced. That reasoning is real, but it
+ * buys the wrong thing: nodemailer offers no AUTH, the relay answers 535, the
+ * outbox classifies it `unauthorized` — which is *not retryable* — and the
+ * message dies. The cost is not a visible error, it is dead mail including
+ * sign-in links, on a deployment whose environment relay was working a moment
+ * earlier. Falling back keeps mail moving; the operator's remedy is to re-enter
+ * the password, and `deployment_setting_secret_unreadable` is logged every time
+ * this path is taken so the state is never silent.
+ *
+ * It is also what `resolveStoredAssistantProvider` has always done for the
+ * identical failure. One failure mode, one answer.
  */
 export function resolveStoredSmtpBlock(deps: ResolveStoredSecretDeps): SmtpEnvBlock | null {
   const block = parseStoredEmailSettings(deps.row.settings)
   if (block === null) return null
   const pass = resolveStoredSecret(deps)
+  // `encryptedSecret` rather than `pass === undefined` alone: those are two
+  // different rows. One stores nothing and is finished; the other stores a
+  // secret that would not come back, and is not.
+  if (deps.row.encryptedSecret !== null && pass === undefined) return null
   return { ...block, ...(pass === undefined ? {} : { pass }) }
 }
 
