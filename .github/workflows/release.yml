@@ -128,6 +128,14 @@ jobs:
       # succeed: a partial publish is recoverable by re-running the workflow,
       # and knowing which images are missing is what makes it recoverable.
       fail-fast: false
+      # Eight simultaneous pushes of images this size is enough to trip GHCR's
+      # secondary rate limit, which arrives as `denied: permission_denied` with
+      # a 403 — indistinguishable at a glance from a token that cannot write.
+      # Measured on the v0.1.0 tag: seven pushed, `tracker-build` was refused,
+      # and a re-run of the same job with the same token succeeded. Four at a
+      # time costs a few minutes of wall clock and buys a release that does not
+      # need a re-run to be whole.
+      max-parallel: 4
       matrix:
         include:
           # The six backend services, all from infra/docker/node-app.Dockerfile.
@@ -312,8 +320,15 @@ jobs:
           {
             echo "## ${{ needs.check.outputs.version }}"
             echo
+            if [ "${{ needs.images.result }}" != "success" ]; then
+              echo "**Not every image was published.** Open the matrix above, find the"
+              echo "ones that failed, and re-run the failed jobs — a tag pointing at an"
+              echo "incomplete image set fails somebody's \`docker compose pull\` on one"
+              echo "image and works on the other seven."
+              echo
+            fi
             if [ "${{ needs.check.outputs.push }}" = "true" ]; then
-              echo "Eight images at \`${{ env.IMAGE_REPO }}/<name>:${{ needs.check.outputs.version }}\`:"
+              echo "Attempted, at \`${{ env.IMAGE_REPO }}/<name>:${{ needs.check.outputs.version }}\`:"
             else
               echo "Dry run — built, not pushed:"
             fi
