@@ -257,7 +257,7 @@ describe('dimension scrubbing (D6.3)', () => {
     // of those interprets at least one of them.
     expect(scrubImportDimension('Chrome [31m')).toBe('Chrome [31m')
     expect(scrubImportDimension('one\ntwo')).toBe('one two')
-    expect(scrubImportDimension('nul here')).toBe('nul here')
+    expect(scrubImportDimension('nul\0here')).toBe('nul here')
   })
 
   it('collapses whitespace so two spellings are not two rows', () => {
