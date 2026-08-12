@@ -654,23 +654,24 @@ export function LoginForm({
                       <>
                         {/* An unclaimed deployment whose only remaining door is
                             the magic link. The link is queued by the api and
-                            delivered by the worker, so on an install that has
-                            not configured mail yet nothing arrives and nothing
-                            says why — and mail is configured from a dashboard
-                            this person cannot reach. Naming the way out is the
-                            only thing this screen can do about it. */}
+                            delivered by the worker, and whether the worker has
+                            a transport at all is something this screen cannot
+                            know: the key that answers it is one the api is
+                            forbidden to read. So the condition is stated rather
+                            than asserted, and the way out is named for the
+                            install where it does not hold. */}
                         {claimBlocked &&
                         !offers("google") &&
                         !offers("github") ? (
                           <p className="rounded-xl bg-muted-foreground/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
                             The only door this deployment offers is the magic
-                            link, and the link needs a mail transport that is
-                            not configured yet. To claim it with an email and a
-                            password instead, set{" "}
+                            link, and it arrives only where mail is already
+                            configured. If no link reaches you, set{" "}
                             <span className="font-mono">
                               AUTH_PASSWORD_SIGNIN=enabled
                             </span>{" "}
-                            on the api and restart it.
+                            on the api and restart it, and claim this deployment
+                            with an email and a password instead.
                           </p>
                         ) : null}
 
