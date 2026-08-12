@@ -57,11 +57,23 @@ but nothing is served on 443 until they resolve.
 
 ### 2. Generate the configuration
 
+**Check out a release, not `main`.** `main` is where work lands; a tag is a tree
+whose images were built, published and smoke-tested together. The compose file,
+the env templates and the migrations all ship with those images, so the tag is
+what keeps them the same version.
+
 ```sh
 git clone https://github.com/OpenLabs-so/openanalytics
-cd openanalytics/infra/selfhost
+cd openanalytics
+git checkout "$(git describe --tags --abbrev=0)"   # or a specific one: git checkout v0.1.0
+cd infra/selfhost
 ./generate-secrets.sh --domain analytics.example --email admin@analytics.example
 ```
+
+Add `--with-geoip` to that last command to download the country and city
+database in the same pass — see [GeoIP](#geoip). It is the one thing in the
+generator that reaches the network, so it is opt-in; if the download fails, the
+generator says so and finishes anyway.
 
 That writes, in one pass so the values that must match actually do:
 
@@ -75,11 +87,45 @@ further** — see [Losing a secret](#losing-a-secret).
 
 ### 3. Bring it up
 
-**On a 4 GB host, add swap first.** The eight images are built here rather than
-pulled, and TypeScript and Next both want more memory than a 4 GB box has spare
-while the stores are already running. Without it a build is killed part way
-through, and the symptom — a container that exits `137` with no error of its own
-— points nowhere near the cause.
+A release publishes **eight images** — `migrate`, `tracker-build`, `api`,
+`collector`, `worker`, `query-gateway`, `realtime`, `web` — so an install pulls
+them instead of compiling them. Point `.env` at the registry and the tag you
+checked out:
+
+```sh
+# in infra/selfhost/.env
+OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics
+OA_IMAGE_TAG=v0.1.0
+```
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose logs -f migrate     # schemas, both stores, from empty
+docker compose ps                  # everything but migrate/tracker-build healthy
+```
+
+**Keep the two the same version as the checkout.** Running a release's images
+from a different release's tree is not a supported configuration: the migrations
+and the env templates belong to the version too.
+
+Images are published for **amd64 only**. On arm64 — a Hetzner CAX box, an Apple
+Silicon machine — build them instead, which is what the paragraph below is
+about. Everything else is identical.
+
+#### Building instead of pulling
+
+Leave `OA_IMAGE_REPO` and `OA_IMAGE_TAG` as the generator wrote them
+(`openanalytics` and `local`) and compose builds all eight here:
+
+```sh
+docker compose up -d --build
+```
+
+**On a 4 GB host, add swap first.** TypeScript and Next both want more memory
+than a 4 GB box has spare while the stores are already running. Without it a
+build is killed part way through, and the symptom — a container that exits `137`
+with no error of its own — points nowhere near the cause.
 
 ```sh
 fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
@@ -88,17 +134,10 @@ echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survive a reboot
 
 Swap is needed for the **build**, not to run the product: a 4 GB host serves an
 ordinary install comfortably once the images exist. Leaving it on costs a file
-and rescues you the next time you build.
+and rescues you the next time you build. Building all eight takes about ten
+minutes on that box, most of it compiling.
 
-```sh
-docker compose up -d
-docker compose logs -f migrate     # schemas, both stores, from empty
-docker compose ps                  # everything but migrate/tracker-build healthy
-```
-
-The first run builds eight images and takes a while — about ten minutes on a
-4 GB Hetzner box, most of it compiling. Order is enforced by the compose file
-and is not cosmetic:
+Either way, the order is enforced by the compose file and is not cosmetic:
 
 1. stores start and become healthy;
 2. `migrate` runs Postgres migrations, then ClickHouse migrations, and exits;
@@ -107,8 +146,9 @@ and is not cosmetic:
 4. `tracker-build` compiles `oa.js` into a volume Caddy serves read-only;
 5. Caddy starts and requests certificates.
 
-Re-running `docker compose up -d` after a `git pull` is the upgrade path. Both
-migration runners keep a ledger and apply only what is pending.
+Later, to move to a newer release, use `./upgrade.sh` — it takes a snapshot
+first, because that snapshot is the only way back. See
+[Upgrades and going back](#upgrades-and-going-back).
 
 ### 4. Claim it
 
@@ -318,6 +358,21 @@ Country and city come from a local City-schema `.mmdb`. Without one every event
 carries null geo, which is why a fresh install shows every country as unknown
 and an empty globe.
 
+The generator does both steps if you ask it to, which is the easiest time to do
+it:
+
+```sh
+./generate-secrets.sh --domain analytics.example --email admin@analytics.example --with-geoip
+```
+
+It downloads the database and uncomments `GEOIP_DB_PATH` in
+`env/collector.env`. **A failed download is not a failed install**: the generator
+reports it, leaves the variable commented out, and finishes — null geo is a
+degradation, and a half-written set of secrets would be a deployment that cannot
+start at all. Retry whenever.
+
+By hand, or later:
+
 ```sh
 cd infra/selfhost/geoip && ./fetch-dbip.sh
 # then in env/collector.env:
@@ -340,8 +395,9 @@ its EULA forbids redistribution.
 database goes stale, and the collector opens it once at boot — a new file on
 disk changes nothing until the process restarts.
 
-The database is never committed: about 60 MB, out of date within a month, and a
-database in git history is in git history forever.
+The database is never committed: a 60 MB download that unpacks to about 125 MB,
+out of date within a month, and a database in git history is in git history
+forever.
 
 City-level detail stays opt-in per site in the dashboard regardless of this.
 
@@ -420,14 +476,32 @@ feature it has not enabled.
 
 ## Backups
 
-**Nothing in this repository takes a backup for you.** `apps/worker/src/backup-watch.ts`
-is a _watcher_: given object-storage credentials it publishes
-`clickhouse_backup_age_seconds` from the newest object under `backups/daily/`, so
-an alert can fire on the **absence** of a recent backup. It never writes one. A
-timer that quietly stopped produces no error to alert on, which is why the signal
-is age rather than failure.
+There is one backup this repository takes, and it is not a backup strategy:
 
-What actually needs backing up, in order of how much it hurts to lose:
+```sh
+cd infra/selfhost
+./snapshot.sh create --label before-something-risky
+./snapshot.sh list
+```
+
+`snapshot.sh` **stops the stack**, archives both data volumes and every secret
+that makes them readable, and starts it again. Cold, because a ClickHouse data
+directory copied while the server is running is not a backup of anything — the
+server merges parts in the background even with no writes, so a live copy can
+contain a part that was being replaced, and you find that out during a restore.
+`./upgrade.sh` runs it, and `./rollback.sh` restores it; that is what it is for.
+
+**It is downtime, and it is on the same disk.** So it is the right tool for "put
+this back the way it was ten minutes ago" and the wrong one for "the host burned
+down". For that, everything below still applies.
+
+`apps/worker/src/backup-watch.ts` is a _watcher_, not a backup: given
+object-storage credentials it publishes `clickhouse_backup_age_seconds` from the
+newest object under `backups/daily/`, so an alert can fire on the **absence** of
+a recent backup. It never writes one. A timer that quietly stopped produces no
+error to alert on, which is why the signal is age rather than failure.
+
+What needs backing up off this machine, in order of how much it hurts to lose:
 
 1. **`infra/selfhost/env/*.env` and `docker-compose.override.yml`.** Not data,
    but without them the data below is unreadable. Store them somewhere that
@@ -458,15 +532,64 @@ Two things worth knowing before you rely on any of it:
 
 ## Operating it
 
-### Upgrades
+### Upgrades and going back
 
 ```sh
-git pull
-docker compose up -d --build
+git fetch --tags
+git checkout v0.2.0            # the release you are moving to
+cd infra/selfhost
+./upgrade.sh                   # tells you what it costs, then does it
 ```
 
-Migrations run first and the rest waits on them. Two orderings the compose file
-already encodes, worth knowing if you deploy the services by hand:
+Run it from the **new** checkout: the script that performs an upgrade ships with
+the version being upgraded to. It works out the target from the tag you are
+standing on, takes a snapshot, points `.env` at the new images, pulls them and
+brings everything up. On an architecture with no published images,
+`./upgrade.sh --from-source` builds instead.
+
+**There are no down migrations, and that is a decision rather than an omission.**
+A reverse migration is code that runs once, in an emergency, having never been
+run before — and the alternative is honest: an upgrade takes a backup first, and
+going back is a restore.
+
+```sh
+./snapshot.sh list
+./rollback.sh --to backups/20260812T140000Z-pre-v0.2.0
+```
+
+Three costs, and they belong here rather than in the rollback instructions,
+because this is where you can still decide otherwise. `./upgrade.sh` prints them
+and waits:
+
+1. **Downtime**, for the length of the snapshot and the restart. Everything
+   stops, the collector included, so events browsers try to send during the
+   window are refused and lost — the tracker does not retry them. Pick a quiet
+   hour.
+2. **Going back loses data.** The restore replaces both stores wholesale, so
+   every event, account and setting recorded after the snapshot goes with it.
+   There is no partial or merged outcome. The cost of deciding to roll back
+   therefore grows with every hour the new version runs, which is the argument
+   for checking the dashboard right after an upgrade rather than the next
+   morning.
+3. **Disk.** A snapshot is a compressed copy of both stores and nothing deletes
+   it for you. `./snapshot.sh list` shows what has accumulated;
+   `--keep <n>` prunes.
+
+Rolling back across versions means going back in the tree too — the compose file
+and the migration set are part of the version:
+
+```sh
+git checkout v0.1.0
+cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.2.0
+```
+
+`rollback.sh` restores the configuration from the snapshot as well, moving the
+current `env/*.env` aside first rather than deleting it, and takes its own
+snapshot before it starts — so a rollback is itself reversible. `--keep-config`
+and `--no-pre-backup` turn off each of those when you have a reason.
+
+Two orderings the compose file already encodes, worth knowing if you deploy the
+services by hand:
 
 - **gateway before api.** The api sends a field on every gateway query that an
   older gateway rejects outright, so an api-first deploy breaks analytics reads
@@ -491,7 +614,8 @@ snippet, and that hour is also the ceiling on how long a broken tracker survives
 after you fix it. To publish a change immediately after an upgrade:
 
 ```sh
-docker compose up -d --build --force-recreate tracker-build
+docker compose up -d --force-recreate tracker-build     # pulled images
+docker compose up -d --build --force-recreate tracker-build   # built here
 ```
 
 Both `oa.js` and `oa.js.gz` are written together — a stale `.gz` beside a fresh
@@ -508,8 +632,10 @@ service which commit it is rather than assuming:
 docker compose exec api node -e "fetch('http://127.0.0.1:8082/health').then(r=>r.json()).then(o=>console.log(o.commit, o.status))"
 ```
 
-Set `OA_GIT_COMMIT=$(git rev-parse HEAD)` in `infra/selfhost/.env` before
-building for that to be useful.
+A pulled image already carries the commit its release was built from. When you
+build here, set `OA_GIT_COMMIT=$(git rev-parse HEAD)` in `infra/selfhost/.env`
+first, or every service answers `unknown` — `./upgrade.sh --from-source` does it
+for you.
 
 ### Losing a secret
 
@@ -577,9 +703,17 @@ design). The message names the variable and which of the two it is.
 origin. Unset or wrong, the api emits no CORS header and every browser call is
 refused. The browser console will say so plainly.
 
-**The dashboard talks to the wrong host.** `NEXT_PUBLIC_*` values are compiled
-into the browser bundle, not read at run time. Changing one needs
-`docker compose build web && docker compose up -d web`.
+**The dashboard talks to the wrong host.** The three `NEXT_PUBLIC_*` origins are
+in `env/web.env`. They are compiled into the browser bundle, but the container
+substitutes them into it at start, so fixing one is a recreate rather than a
+rebuild: `docker compose up -d --force-recreate web`. The container logs the
+three origins it started with on its first line — read that before assuming.
+
+**The dashboard container will not start and says a variable is required.** That
+is the same mechanism failing closed. All three origins must be set and each must
+be a bare origin: scheme, host, optional port, no path and no trailing slash. A
+dashboard that starts with the wrong origins looks like a working page and sends
+every request somewhere else, which is why this exits instead.
 
 **ClickHouse will not start after an edit.** A line beginning `oa-entrypoint:` is
 the entrypoint refusing a value and naming it — fix and recreate. Otherwise the

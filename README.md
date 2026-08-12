@@ -58,11 +58,21 @@ app.example.com   api.example.com   c.example.com   rt.example.com
 
 ```sh
 git clone https://github.com/OpenLabs-so/openanalytics
-cd openanalytics/infra/selfhost
-./generate-secrets.sh --domain example.com --email you@example.com
-docker compose up -d
+cd openanalytics
+git checkout "$(git describe --tags --abbrev=0)"   # install a release, not main
+cd infra/selfhost
+./generate-secrets.sh --domain example.com --email you@example.com --with-geoip
+# point .env at the release's images, then:
+docker compose pull && docker compose up -d
 # then open https://app.example.com and create the first account
 ```
+
+A release publishes eight images for amd64 to
+`ghcr.io/openlabs-so/openanalytics`. On arm64, or to run a branch, build them
+here instead — same compose file, one flag. Later, `./upgrade.sh` moves between
+releases and takes the snapshot that `./rollback.sh` needs, because **migrations
+do not go down**: the way back is a restore. [RELEASING.md](RELEASING.md) is what
+a version number here means.
 
 To run it from source instead — for development, or to slot the services into
 infrastructure you already have — follow
@@ -91,7 +101,7 @@ Global Privacy Control are honored at the collector, before anything is written.
 City-level geolocation is opt-in per site.
 
 Geolocation is resolved locally against a database on your own disk — no lookup
-ever leaves the host. None is bundled (about 60 MB, and stale within a month);
+ever leaves the host. None is bundled (a 60 MB download, and stale within a month);
 `infra/selfhost/geoip/fetch-dbip.sh` downloads one.
 
 > IP Geolocation by DB-IP — [https://db-ip.com](https://db-ip.com) — used under

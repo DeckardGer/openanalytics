@@ -10,6 +10,11 @@
 #                                 templates, with generated secrets filled in
 #   docker-compose.override.yml   the three Ed25519 pairs as YAML block scalars
 #
+# With `--with-geoip` it also downloads the DB-IP City Lite database and points
+# env/collector.env at it. That is the ONLY thing in here that touches the
+# network — everything else is local computation — which is why it is opt-in,
+# and why its failure is a warning rather than an exit.
+#
 # WHY THE KEYS ARE NOT IN AN ENV FILE. They are PEMs, and a PEM is multi-line.
 # An env file cannot carry a multi-line value, and writing one with an escaped
 # "\n" does not help: Docker passes those through as two literal characters and
@@ -33,19 +38,28 @@ cd "$(dirname "$0")"
 DOMAIN=""
 EMAIL=""
 FORCE=0
+WITH_GEOIP=0
 
 usage() {
 	cat >&2 <<'USAGE'
-usage: ./generate-secrets.sh --domain <example.com> --email <you@example.com> [--force]
+usage: ./generate-secrets.sh --domain <example.com> --email <you@example.com>
+                            [--with-geoip] [--force]
 
-  --domain  the base domain. Four names are derived from it and must resolve
-            to this host before the first start:
-              app.<domain>  api.<domain>  c.<domain>  rt.<domain>
-  --email   contact address for the Let's Encrypt account
-  --force   overwrite files that already exist. THIS REPLACES LIVE SECRETS:
-            the new database passwords will not match the ones already inside
-            your Postgres and ClickHouse volumes, so an existing install stops
-            working. Use it on a fresh install, or to start over.
+  --domain      the base domain. Four names are derived from it and must resolve
+                to this host before the first start:
+                  app.<domain>  api.<domain>  c.<domain>  rt.<domain>
+  --email       contact address for the Let's Encrypt account
+  --with-geoip  also download the DB-IP City Lite database (~60 MB, CC BY 4.0)
+                and point env/collector.env at it. Off by default: everything
+                else here is local computation, and a generator that reaches
+                out to a third-party host whether or not you asked is a
+                generator you cannot run on a machine that has no route out.
+                A failed download is not fatal — see below.
+  --force       overwrite files that already exist. THIS REPLACES LIVE SECRETS:
+                the new database passwords will not match the ones already
+                inside your Postgres and ClickHouse volumes, so an existing
+                install stops working. Use it on a fresh install, or to start
+                over.
 USAGE
 	exit 2
 }
@@ -59,6 +73,10 @@ while [ $# -gt 0 ]; do
 	--email)
 		EMAIL="${2:-}"
 		shift 2
+		;;
+	--with-geoip)
+		WITH_GEOIP=1
+		shift
 		;;
 	--force)
 		FORCE=1
@@ -202,16 +220,17 @@ OA_COLLECTOR_HOST=c.${DOMAIN}
 OA_REALTIME_HOST=rt.${DOMAIN}
 OA_ACME_EMAIL=${EMAIL}
 
-# Build arguments for the dashboard image: Next.js inlines these into the
-# browser bundle, so changing one needs \`docker compose build web\`.
-OA_PUBLIC_API_URL=${OA_SUB_AUTH_BASE_URL}
-OA_PUBLIC_COLLECTOR_URL=${OA_SUB_COLLECTOR_BASE_URL}
-OA_PUBLIC_REALTIME_URL=${OA_SUB_REALTIME_BASE_URL}
+# The three origins the dashboard's browser code calls are in env/web.env, not
+# here: the image substitutes them at start rather than compiling them in.
 
 OA_SUBNET=${OA_SUBNET:-172.28.0.0/16}
 OA_VALKEY_QUEUE_IP=${OA_SUB_VALKEY_QUEUE_IP}
 OA_VALKEY_REALTIME_IP=${OA_SUB_VALKEY_REALTIME_IP}
 
+# Every image is \`\${OA_IMAGE_REPO}/name:\${OA_IMAGE_TAG}\`. These two build them
+# here; a release install points them at the registry instead — see
+# .env.example, or run ./upgrade.sh.
+OA_IMAGE_REPO=openanalytics
 OA_IMAGE_TAG=local
 OA_GIT_COMMIT=unknown
 ENV
@@ -282,13 +301,71 @@ HEADER
 chmod 600 docker-compose.override.yml
 echo "wrote docker-compose.override.yml"
 
+# --- optional: the GeoIP database -------------------------------------------
+# `umask 077` above is right for everything else here and wrong for this
+# directory: the collector mounts it read-only and reads it as the unprivileged
+# `node` user inside the container, which cannot traverse a 700 directory owned
+# by the root that ran this script. The database is public data — the secrecy
+# that protects the env files protects nothing here and costs null geo.
 mkdir -p geoip
+chmod 755 geoip
+
+GEOIP_LINE='GEOIP_DB_PATH=/geoip/dbip-city-lite.mmdb'
+GEOIP_STATUS='not requested'
+
+if [ "$WITH_GEOIP" -eq 1 ]; then
+	echo
+	echo "Fetching the GeoIP database (DB-IP City Lite, ~60 MB)…"
+
+	# A FAILED DOWNLOAD IS NOT A FAILED INSTALL. Null geo is a degradation the
+	# product is built to tolerate — every event just carries no country — while
+	# a generator that dies here leaves half-written secrets and a deployment
+	# that cannot start at all. So the failure is caught, reported, and the
+	# variable stays commented out.
+	#
+	# `bash …` rather than `./…`: this must not depend on a mode bit surviving
+	# however the tree got onto this host.
+	if bash geoip/fetch-dbip.sh; then
+		# Uncomment the one line the template ships commented. Anchored to the
+		# exact text, so a template edit is caught rather than silently ignored
+		# — tests/unit/selfhost-templates.test.ts pins the same string.
+		if grep -qxF "# ${GEOIP_LINE}" env/collector.env; then
+			# awk into a temp file, not `sed -i`: GNU sed and BSD sed disagree
+			# about whether -i takes an argument, so there is no spelling that
+			# works on both. `cat >` rather than `mv` keeps the 600 mode and
+			# ownership the rendered file already has.
+			tmp="$(mktemp)"
+			awk -v line="$GEOIP_LINE" '$0 == "# " line { print line; next } { print }' \
+				env/collector.env >"$tmp"
+			cat "$tmp" >env/collector.env
+			rm -f "$tmp"
+			GEOIP_STATUS='enabled'
+		else
+			GEOIP_STATUS='template drift'
+			echo "generate-secrets: env/collector.env has no commented GEOIP_DB_PATH line to enable." >&2
+			echo "                  The database downloaded fine. Add this line yourself:" >&2
+			echo "                    ${GEOIP_LINE}" >&2
+		fi
+	else
+		GEOIP_STATUS='download failed — left disabled'
+		echo >&2
+		echo "generate-secrets: the GeoIP download failed. CARRYING ON: every event will" >&2
+		echo "                  carry null geo until you fix it, which is a degradation and" >&2
+		echo "                  not a broken install. Everything else here is written." >&2
+		echo "                  Retry any time:" >&2
+		echo "                    cd geoip && ./fetch-dbip.sh" >&2
+		echo "                  then uncomment ${GEOIP_LINE} in env/collector.env" >&2
+		echo "                  and: docker compose up -d --force-recreate collector" >&2
+	fi
+fi
 
 cat <<DONE
 
 Done. Four DNS records must point at this host before the first start:
 
   app.${DOMAIN}   api.${DOMAIN}   c.${DOMAIN}   rt.${DOMAIN}
+
+GeoIP: ${GEOIP_STATUS}
 
 Then:
 

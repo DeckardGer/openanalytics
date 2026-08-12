@@ -60,8 +60,13 @@ is a bug worth reporting on its own.
   the ceiling; a feature that cannot pay for its bytes needs a discussion first.
 - **Migrations are forward-only and expand-first.** There are no down
   migrations, by decision: the rollback path is a backup taken before the
-  upgrade and a restore to go back. A migration that cannot be deployed ahead of
-  the code that needs it is a migration to split in two.
+  upgrade and a restore to go back — `infra/selfhost/upgrade.sh` and
+  `rollback.sh` are that path. A migration that cannot be deployed ahead of the
+  code that needs it is a migration to split in two.
+- **Releases are tags, and a version number is a promise about upgrading.**
+  [RELEASING.md](RELEASING.md) says which changes bump the minor rather than the
+  patch. If your change needs an operator to do anything by hand, say so in the
+  pull request: that sentence is what the release notes are made of.
 - **A behaviour change needs a test that was seen failing first.** A test
   written after the fact, that has never been red, pins nothing.
 - **Secrets never reach a log, an error message or a response.** Recipient

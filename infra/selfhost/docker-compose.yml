@@ -40,6 +40,27 @@
 #    image, which is why the ordering works out. Postgres first, then
 #    ClickHouse; every application service waits for it to exit 0.
 #
+# 4. EVERY IMAGE NAME IS `${OA_IMAGE_REPO}/name:${OA_IMAGE_TAG}`, AND THE
+#    DEFAULTS BUILD LOCALLY. Unset, they resolve to `openanalytics/name:local` —
+#    a name no registry serves, so compose builds it here, which is what this
+#    file did before releases existed and still does from a `git clone` of main.
+#
+#    A release install sets both in `.env` (`./generate-secrets.sh` writes them,
+#    and `./upgrade.sh` maintains them):
+#
+#      OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics
+#      OA_IMAGE_TAG=v0.1.0
+#
+#    and then `docker compose pull` fetches the eight images the release built
+#    instead of compiling them on a box that would rather be serving. THE TWO
+#    HAVE TO MATCH THE CHECKOUT: the compose file, the env templates and the
+#    migrations are versioned with the images, so run a release tag's images
+#    from that release tag's tree. See /RELEASING.md.
+#
+#    `build:` stays on every service on purpose. It is what a source install
+#    uses, what any architecture we do not publish for uses, and what makes a
+#    local change testable without a registry round trip.
+#
 # ---------------------------------------------------------------------------
 # Optional pieces, off by default, enabled with `--profile`:
 #   --profile object-storage   MinIO, for data import/export and CSV exports
@@ -197,7 +218,7 @@ services:
     # Its own tag rather than the worker's, so two services never claim to
     # produce the same image. Same Dockerfile, same layers, so the build is a
     # cache hit after the worker's.
-    image: openanalytics/migrate:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/migrate:${OA_IMAGE_TAG:-local}
     container_name: oa-migrate
     restart: 'no'
     env_file: env/migrate.env
@@ -227,7 +248,7 @@ services:
     build:
       <<: *node-build
       target: build
-    image: openanalytics/tracker-build:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/tracker-build:${OA_IMAGE_TAG:-local}
     container_name: oa-tracker-build
     restart: 'no'
     # The build enforces a GZIPPED size budget, so the gzip is written once here
@@ -266,7 +287,7 @@ services:
       args:
         APP: query-gateway
         GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
-    image: openanalytics/query-gateway:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/query-gateway:${OA_IMAGE_TAG:-local}
     container_name: oa-gateway
     env_file: env/gateway.env
     healthcheck: *node-healthcheck
@@ -290,7 +311,7 @@ services:
       args:
         APP: api
         GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
-    image: openanalytics/api:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/api:${OA_IMAGE_TAG:-local}
     container_name: oa-api
     env_file: env/api.env
     healthcheck: *node-healthcheck
@@ -311,7 +332,7 @@ services:
       args:
         APP: collector
         GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
-    image: openanalytics/collector:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/collector:${OA_IMAGE_TAG:-local}
     container_name: oa-collector
     env_file: env/collector.env
     volumes:
@@ -335,7 +356,7 @@ services:
       args:
         APP: worker
         GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
-    image: openanalytics/worker:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/worker:${OA_IMAGE_TAG:-local}
     container_name: oa-worker
     env_file: env/worker.env
     healthcheck: *node-healthcheck
@@ -353,7 +374,7 @@ services:
       args:
         APP: realtime
         GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
-    image: openanalytics/realtime:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/realtime:${OA_IMAGE_TAG:-local}
     container_name: oa-realtime
     env_file: env/realtime.env
     healthcheck: *node-healthcheck
@@ -364,21 +385,19 @@ services:
   # The dashboard. A Next.js app that may import only the OpenAPI contract
   # package — it talks to the api over HTTP like any other client.
   #
-  # ITS THREE PUBLIC URLS ARE BAKED IN AT BUILD TIME. `NEXT_PUBLIC_*` values are
-  # inlined into the browser bundle, so changing a hostname means rebuilding
-  # this image: `docker compose build web && docker compose up -d web`. They are
-  # passed as env as well, for the server-rendered half.
+  # ITS THREE PUBLIC URLS ARE READ FROM `env/web.env` AT START, not baked in.
+  # Next.js does inline `NEXT_PUBLIC_*` into the browser bundle at build time,
+  # so the image is built against placeholder origins and its entrypoint
+  # substitutes the real ones before the server starts — which is what lets the
+  # same published image serve any deployment. See web.Dockerfile.
   web:
     <<: *node-service
     build:
       context: ../..
       dockerfile: infra/selfhost/web.Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${OA_PUBLIC_API_URL:?set OA_PUBLIC_API_URL in infra/selfhost/.env}
-        NEXT_PUBLIC_REALTIME_URL: ${OA_PUBLIC_REALTIME_URL:?set OA_PUBLIC_REALTIME_URL in infra/selfhost/.env}
-        NEXT_PUBLIC_COLLECTOR_URL: ${OA_PUBLIC_COLLECTOR_URL:?set OA_PUBLIC_COLLECTOR_URL in infra/selfhost/.env}
         GIT_COMMIT: ${OA_GIT_COMMIT:-unknown}
-    image: openanalytics/web:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/web:${OA_IMAGE_TAG:-local}
     container_name: oa-web
     env_file: env/web.env
     healthcheck:
@@ -453,7 +472,7 @@ services:
   # env/api.env and recreate the api to use the account this makes, then turn it
   # back off once OAuth or mail works.
   create-admin:
-    image: openanalytics/migrate:${OA_IMAGE_TAG:-local}
+    image: ${OA_IMAGE_REPO:-openanalytics}/migrate:${OA_IMAGE_TAG:-local}
     profiles: ['tools']
     restart: 'no'
     env_file: env/api.env

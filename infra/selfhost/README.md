@@ -6,21 +6,25 @@ repository root — this file only says what is in this directory.
 
 ```sh
 ./generate-secrets.sh --domain analytics.example --email admin@analytics.example
+docker compose pull      # a release's eight images; omit to build them here
 docker compose up -d
 ```
 
-| Path                  | What                                                                     |
-| --------------------- | ------------------------------------------------------------------------ |
-| `docker-compose.yml`  | The whole stack. Its header explains the three load-bearing choices.     |
-| `generate-secrets.sh` | Writes `.env`, `env/*.env` and the key-pair override, in one pass        |
-| `.env.example`        | The values compose interpolates — hostnames and the network. No secrets. |
-| `env/*.env.example`   | One template per service. There is no shared environment; see below.     |
-| `Caddyfile`           | TLS front for the four public names. **Read its header before editing.** |
-| `nginx.conf.example`  | The same shape for nginx, if you already run one                         |
-| `web.Dockerfile`      | The dashboard image (the backend uses `../docker/node-app.Dockerfile`)   |
-| `clickhouse/`         | Entrypoint that provisions the four least-privilege users, and config    |
-| `valkey/`             | Entrypoint and the two policy files — durable queue, losable cache       |
-| `geoip/`              | Where you put a City-schema `.mmdb`. Empty: it may not be redistributed. |
+| Path                  | What                                                                      |
+| --------------------- | ------------------------------------------------------------------------- |
+| `docker-compose.yml`  | The whole stack. Its header explains the four load-bearing choices.       |
+| `generate-secrets.sh` | Writes `.env`, `env/*.env` and the key-pair override, in one pass         |
+| `upgrade.sh`          | Snapshot, then move to the release this checkout is on                    |
+| `rollback.sh`         | Restore a snapshot — the only way back, because migrations do not go down |
+| `snapshot.sh`         | The cold backup and restore both of those are built on                    |
+| `.env.example`        | The values compose interpolates — hostnames and the network. No secrets.  |
+| `env/*.env.example`   | One template per service. There is no shared environment; see below.      |
+| `Caddyfile`           | TLS front for the four public names. **Read its header before editing.**  |
+| `nginx.conf.example`  | The same shape for nginx, if you already run one                          |
+| `web.Dockerfile`      | The dashboard image (the backend uses `../docker/node-app.Dockerfile`)    |
+| `clickhouse/`         | Entrypoint that provisions the four least-privilege users, and config     |
+| `valkey/`             | Entrypoint and the two policy files — durable queue, losable cache        |
+| `geoip/`              | Where you put a City-schema `.mmdb`. Empty: it may not be redistributed.  |
 
 Two things that surprise people, both explained at length in the compose
 header and in `/SELF-HOSTING.md`:

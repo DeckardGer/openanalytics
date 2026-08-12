@@ -1,0 +1,314 @@
+name: Release
+
+# Publishes the eight container images a release consists of, on a tag.
+#
+# WHY EIGHT. Count them in `infra/selfhost/docker-compose.yml`: migrate,
+# tracker-build, api, collector, worker, query-gateway, realtime, web. Seven is
+# the number you get by forgetting that `migrate` is its own image — it shares
+# the worker's Dockerfile and layers but not its tag, because two services must
+# never claim to produce the same image. `create-admin` is the ninth service that
+# runs the `migrate` image and not a ninth image.
+#
+# `tests/unit/selfhost-templates.test.ts` asserts that this list and the compose
+# file's list are the same set, so the two cannot drift apart quietly.
+#
+# ## Permissions
+#
+# `packages: write` is declared here because it has to be: the repository's
+# default workflow token is read-only (Settings → Actions → Workflow
+# permissions), and an explicit `permissions:` block overrides that default for
+# this workflow only. Nothing needs to be clicked for that.
+#
+# What DOES need a click, once per package name: a container package is PRIVATE
+# when it is first created, whatever the repository's visibility. The first
+# release publishes eight packages that only the organisation can pull, and
+# making them public is eight visits to each package's settings page. There is no
+# API for it. /RELEASING.md says so where somebody cutting a release will read
+# it.
+#
+# ## One architecture
+#
+# amd64 only. Cross-building these under emulation is roughly an hour per image
+# for the two TypeScript builds and worse for the Next.js one, which would put a
+# release out of reach of a normal runner. An arm64 host runs the same product
+# from source — `./upgrade.sh --from-source` — and that is the documented answer
+# until this is worth a native runner.
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    tags: ['v*']
+  # Lets a tag be re-published after a failure without moving the tag, and lets
+  # the workflow be exercised on a branch: `dry_run` builds every image and
+  # pushes none of them.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build all eight images and push nothing'
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # Lower-cased on purpose: the organisation is `OpenLabs-so` and a registry path
+  # must be lower case, so `${{ github.repository_owner }}` cannot be used raw.
+  IMAGE_REPO: ghcr.io/openlabs-so/openanalytics
+
+jobs:
+  # Cheap and first: a tag that disagrees with the tree is a release nobody can
+  # reason about afterwards, and finding out after eight image builds is finding
+  # out too late.
+  check:
+    name: The tag and the tree agree
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      push: ${{ steps.version.outputs.push }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: version
+        name: Resolve the version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${{ github.ref_name }}"
+            push=true
+          else
+            # A dispatch on a branch: build, do not publish, and label the images
+            # with something that cannot be mistaken for a release.
+            version="0.0.0-dispatch.${GITHUB_SHA::7}"
+            push=$([ "${{ inputs.dry_run }}" = "false" ] && echo true || echo false)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          case "$version" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "push=$push" >> "$GITHUB_OUTPUT"
+          echo "version=$version push=$push"
+
+      # RELEASING.md: the git tag is the source of truth and package.json is
+      # bumped to match in the release commit. This is the half that makes that
+      # sentence true — the two cannot drift, because the release fails instead.
+      - name: package.json version matches the tag
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          declared="$(node -p "require('./package.json').version")"
+          tag="${{ steps.version.outputs.version }}"
+          if [ "v$declared" != "$tag" ]; then
+            echo "::error::the tag is $tag but package.json says $declared." \
+                 "Bump package.json in the release commit — see RELEASING.md." >&2
+            exit 1
+          fi
+          echo "package.json $declared matches $tag"
+
+  images:
+    name: ${{ matrix.image }}
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      # One image's failure must not cancel seven builds that were going to
+      # succeed: a partial publish is recoverable by re-running the workflow,
+      # and knowing which images are missing is what makes it recoverable.
+      fail-fast: false
+      matrix:
+        include:
+          # The six backend services, all from infra/docker/node-app.Dockerfile.
+          - image: api
+            app: api
+          - image: collector
+            app: collector
+          - image: worker
+            app: worker
+          - image: query-gateway
+            app: query-gateway
+          - image: realtime
+            app: realtime
+          # Same Dockerfile and the same APP as the worker, published under its
+          # own name — see the header. The layer cache makes it nearly free.
+          - image: migrate
+            app: worker
+          # The tracker builder: the `build` stage, because esbuild is a dev
+          # dependency the runtime stage deliberately does not carry.
+          - image: tracker-build
+            target: build
+          # The dashboard, from its own Dockerfile.
+          - image: web
+            dockerfile: infra/selfhost/web.Dockerfile
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: needs.check.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile || 'infra/docker/node-app.Dockerfile' }}
+          target: ${{ matrix.target || '' }}
+          push: ${{ needs.check.outputs.push == 'true' }}
+          # Loaded into the local daemon on a dry run so the web smoke test below
+          # has something to run. A pushed build is not loaded — the image is in
+          # the registry, and pulling it back to test it is what the release
+          # verification job does.
+          load: ${{ needs.check.outputs.push != 'true' }}
+          build-args: |
+            APP=${{ matrix.app || '' }}
+            GIT_COMMIT=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE_REPO }}/${{ matrix.image }}:${{ needs.check.outputs.version }}
+          # `latest` follows final releases only. A pre-release that moved it
+          # would hand it to anyone who pulled without pinning.
+          # (Second tag added conditionally below rather than here, because an
+          # empty line in `tags:` is an error.)
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          provenance: false
+
+      - name: Also tag latest
+        if: needs.check.outputs.push == 'true' && needs.check.outputs.prerelease == 'false'
+        run: |
+          set -euo pipefail
+          src="${{ env.IMAGE_REPO }}/${{ matrix.image }}:${{ needs.check.outputs.version }}"
+          docker buildx imagetools create --tag "${{ env.IMAGE_REPO }}/${{ matrix.image }}:latest" "$src"
+
+  # The one image whose correctness cannot be inferred from "it built".
+  #
+  # The dashboard's three origins are compiled into its browser bundle, so the
+  # published image is built against placeholders and substitutes the real values
+  # at start. If that substitution ever silently stopped working, every install
+  # from that release would serve a dashboard calling `.invalid` — a failure that
+  # looks like a working page. So: run it, ask it for a page, and read the bytes.
+  web-runtime:
+    name: The dashboard serves the origins it was given
+    needs: [check, images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: needs.check.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull what was published when there is something published — testing the
+      # artefact rather than a rebuild of it. Otherwise rebuild locally from the
+      # same cache the matrix filled.
+      - name: Get the web image
+        id: image
+        run: |
+          set -euo pipefail
+          ref="${{ env.IMAGE_REPO }}/web:${{ needs.check.outputs.version }}"
+          if [ "${{ needs.check.outputs.push }}" = "true" ]; then
+            docker pull "$ref"
+          else
+            docker buildx build \
+              --file infra/selfhost/web.Dockerfile \
+              --cache-from type=gha,scope=web \
+              --build-arg GIT_COMMIT="$GITHUB_SHA" \
+              --load --tag "$ref" .
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: A dashboard given real origins serves them
+        run: |
+          set -euo pipefail
+          docker run -d --name oa-web -p 3000:3000 \
+            -e NEXT_PUBLIC_API_URL=https://api.runtime-check.example \
+            -e NEXT_PUBLIC_REALTIME_URL=https://rt.runtime-check.example \
+            -e NEXT_PUBLIC_COLLECTOR_URL=https://c.runtime-check.example \
+            "${{ steps.image.outputs.ref }}"
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/login >/dev/null 2>&1; then
+              echo "answered after ${attempt} attempt(s)"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "--- the entrypoint's own account of what it did ---"
+          docker logs oa-web 2>&1 | head -20
+
+          page="$(curl -fsS http://localhost:3000/login)"
+          # The page is server-rendered from the same substituted bundle, so the
+          # origin has to be in what it serves. Both directions are asserted: the
+          # value present AND the placeholder absent. Only checking for the value
+          # would pass on an image that still carried both.
+          echo "$page" | grep -q 'api.runtime-check.example' \
+            || { echo "::error::the api origin is not in the served page"; exit 1; }
+          if echo "$page" | grep -q 'oa-runtime-url.invalid'; then
+            echo "::error::a build-time placeholder is being served to browsers"
+            exit 1
+          fi
+          echo "the served page carries this deployment's origins and no placeholder"
+
+      # The other half of the contract: a missing origin must stop the container
+      # rather than serve a dashboard that calls nowhere.
+      - name: A dashboard given nothing refuses to start
+        run: |
+          set -euo pipefail
+          if docker run --rm "${{ steps.image.outputs.ref }}" 2>err.txt; then
+            echo "::error::the container started with no origins configured"
+            exit 1
+          fi
+          cat err.txt
+          grep -q 'NEXT_PUBLIC_API_URL is required' err.txt \
+            || { echo "::error::it failed, but not for the documented reason"; exit 1; }
+          echo "it exits, and says which variable is missing"
+
+      - name: Container log on failure
+        if: failure()
+        run: docker logs oa-web || true
+
+  summary:
+    name: What was published
+    needs: [check, images, web-runtime]
+    if: always() && needs.check.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write it down
+        run: |
+          {
+            echo "## ${{ needs.check.outputs.version }}"
+            echo
+            if [ "${{ needs.check.outputs.push }}" = "true" ]; then
+              echo "Eight images at \`${{ env.IMAGE_REPO }}/<name>:${{ needs.check.outputs.version }}\`:"
+            else
+              echo "Dry run — built, not pushed:"
+            fi
+            echo
+            for image in migrate tracker-build api collector worker query-gateway realtime web; do
+              echo "- \`$image\`"
+            done
+            echo
+            echo "images: ${{ needs.images.result }} · dashboard runtime check: ${{ needs.web-runtime.result }}"
+            echo
+            if [ "${{ needs.check.outputs.push }}" = "true" ]; then
+              echo "A package is **private** until somebody makes it public — once per name, in the package's own settings. See RELEASING.md."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
