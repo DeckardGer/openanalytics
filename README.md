@@ -48,9 +48,13 @@ Architecture rules CI enforces, not conventions:
 every failure mode. Requirements are a Linux host with Docker, four DNS records
 and about 4 GB of RAM.
 
+**Installing is a pull, not a build.** A release publishes eight images to
+`ghcr.io/openlabs-so/openanalytics`, so a fresh host is a few minutes and needs
+no toolchain on it.
+
 **Point four names at the host before you start.** Certificates are issued on
-the first boot and issuance fails without them, half an hour after the build
-began and nowhere near the cause:
+the first boot and issuance fails without them, half an hour later and nowhere
+near the cause:
 
 ```
 app.example.com   api.example.com   c.example.com   rt.example.com
@@ -59,20 +63,36 @@ app.example.com   api.example.com   c.example.com   rt.example.com
 ```sh
 git clone https://github.com/OpenLabs-so/openanalytics
 cd openanalytics
-git checkout "$(git describe --tags --abbrev=0)"   # install a release, not main
+git checkout v0.1.0          # a release, not main
 cd infra/selfhost
 ./generate-secrets.sh --domain example.com --email you@example.com --with-geoip
-# point .env at the release's images, then:
+```
+
+The generator writes defaults that build the images here. Point the two at the
+release you just checked out instead:
+
+```sh
+# infra/selfhost/.env
+OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics
+OA_IMAGE_TAG=v0.1.0
+```
+
+```sh
 docker compose pull && docker compose up -d
 # then open https://app.example.com and create the first account
 ```
 
-A release publishes eight images for amd64 to
-`ghcr.io/openlabs-so/openanalytics`. On arm64, or to run a branch, build them
-here instead — same compose file, one flag. Later, `./upgrade.sh` moves between
-releases and takes the snapshot that `./rollback.sh` needs, because **migrations
-do not go down**: the way back is a restore. [RELEASING.md](RELEASING.md) is what
-a version number here means.
+The version appears twice on purpose. The compose file, the env templates and
+the migrations ship _with_ the images, so the checkout and the image tag are one
+version or the install is a configuration nobody has tested.
+
+Images are amd64. On arm64, or to run a branch, build the eight here instead:
+same compose file, one flag, about ten minutes and swap on a 4 GB box. Later,
+`./upgrade.sh` moves between releases and takes the snapshot `./rollback.sh`
+needs, because **migrations do not go down**: the way back is a restore, and a
+restore discards what arrived after the upgrade. It tells you that before it
+starts, not at rollback time when you no longer have a choice.
+[RELEASING.md](RELEASING.md) is what a version number here means.
 
 To run it from source instead — for development, or to slot the services into
 infrastructure you already have — follow

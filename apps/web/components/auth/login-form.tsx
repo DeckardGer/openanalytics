@@ -243,7 +243,7 @@ export function LoginForm({
    * Whether the deployment can be claimed *here*, on this form.
    *
    * Claiming writes an email and a password, so it needs the password
-   * endpoints mounted — the deployment decides that, and the api reports the
+   * endpoints mounted. The deployment decides that, and the api reports the
    * decision by listing `password` among the providers. Where they are not
    * mounted the setup route still exists and still answers, but the sign-up
    * inside it fails and the caller is told the deployment is already claimed,
