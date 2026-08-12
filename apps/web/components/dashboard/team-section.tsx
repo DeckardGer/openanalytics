@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { CreditCardIcon, ViewIcon } from "hugeicons-react";
@@ -516,12 +517,12 @@ export function TeamSection({ site }: { site: SiteSummary }) {
             <p className="text-xs leading-5 text-muted-foreground">
               An invitation is an email. If this deployment has no mail
               transport, it is queued and never delivered —{" "}
-              <a
+              <Link
                 className="underline underline-offset-2 hover:text-foreground"
                 href="/dashboard/account?tab=deployment"
               >
                 set one up and send yourself a test
-              </a>
+              </Link>
               .
             </p>
           ) : null}
