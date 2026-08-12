@@ -27,8 +27,8 @@ project — code, documentation, configuration, tests — through a pull request
 issue, or any other channel the maintainers use to accept work. It does not
 include anything you clearly mark, in writing, as "Not a Contribution".
 
-**"The Maintainers"** means OpenLabs, the operators of `getopen.so`, and their
-successors.
+**"The Maintainers"** means OpenLabs LLC, the operators of `getopen.so`, and
+their successors.
 
 ## 2. Copyright licence
 
