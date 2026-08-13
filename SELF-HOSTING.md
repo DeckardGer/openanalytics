@@ -65,7 +65,7 @@ what keeps them the same version.
 ```sh
 git clone https://github.com/OpenLabs-so/openanalytics
 cd openanalytics
-git checkout "$(git describe --tags --abbrev=0)"   # or a specific one: git checkout v0.1.0
+git checkout "$(git describe --tags --abbrev=0)"   # or a specific one: git checkout v0.1.1
 cd infra/selfhost
 ./generate-secrets.sh --domain analytics.example --email admin@analytics.example
 ```
@@ -96,7 +96,7 @@ them instead of compiling them. The generator has already pointed `.env` at
 them, because you checked out the tag before running it:
 
 ```sh
-grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.1.0
+grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.1.1
 docker compose pull
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
