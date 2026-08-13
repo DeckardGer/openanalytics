@@ -778,8 +778,9 @@ export function RealtimeBoard() {
    * trail read resolves for *this* hash, the journey band shows a
    * placeholder, not an empty band a reader would take as "no history".
    * An answered-and-empty trail is real: the server has no pageviews for
-   * this hash in the window — a presence-only visitor, or the read lagging
-   * the leading edge of ingest by a minute or two.
+   * this hash in the window — a presence-only visitor, a visitor whose
+   * address changed mid-visit and so is on their second hash, or (rarely,
+   * and only under a backlog) the read lagging the leading edge of ingest.
    */
   const trailLoaded = !LIVE_API || serverSessions !== null;
 
@@ -1181,14 +1182,25 @@ export function RealtimeBoard() {
                             trailLoaded ? (
                               // Answered and empty — a real fact, stated: the
                               // server has no pageviews for this hash in the
-                              // window (a presence-only visitor, or a visit
-                              // too fresh for the read to have caught up).
+                              // window. The copy used to blame ingest lag
+                              // ("can take a minute"), which is the rarest
+                              // cause and the one a reader can do nothing
+                              // with. The ordinary causes are structural:
+                              // presence is refreshed by *any* accepted batch
+                              // (ADR-0035 D6) and by a heartbeat that writes
+                              // no history at all, and the anonymous id is
+                              // keyed on the visitor's address — so a changed
+                              // address mints a new hash whose pageviews all
+                              // sit under the previous one. Both read as
+                              // "here now, nothing behind them", and neither
+                              // resolves by waiting.
                               <motion.p
                                 variants={MODAL_ITEM}
                                 className="px-2 py-4 text-center text-sm leading-6 text-muted-foreground"
                               >
-                                No pageviews in the last 24 hours. A brand-new
-                                visit can take a minute to appear here.
+                                No pageviews recorded for this visitor in the
+                                last 24 hours. Presence is refreshed by any
+                                activity, so somebody can be here without one.
                               </motion.p>
                             ) : (
                               // Not answered yet — a placeholder card, so an
