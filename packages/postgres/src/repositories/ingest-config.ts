@@ -102,6 +102,7 @@ export async function resolveIngestConfig(
       featureEngagement: siteIngestSettings.featureEngagement,
       featureInteractions: siteIngestSettings.featureInteractions,
       featureHeartbeat: siteIngestSettings.featureHeartbeat,
+      attributedRevenue: siteIngestSettings.attributedRevenue,
       allowedDomains: sql<string[]>`coalesce(
         (SELECT array_agg(lower(domain)) FROM site_domains WHERE site_id = ${sites.id}),
         '{}'
@@ -165,6 +166,7 @@ export async function resolveIngestConfig(
         interactions: row.featureInteractions ?? DEFAULT_TRACKER_SETTINGS.features.interactions,
         heartbeat: row.featureHeartbeat ?? DEFAULT_TRACKER_SETTINGS.features.heartbeat,
       },
+      attributedRevenue: row.attributedRevenue ?? DEFAULT_TRACKER_SETTINGS.attributedRevenue,
     },
   }
 }
@@ -176,6 +178,7 @@ export interface UpsertSiteIngestSettingsInput {
   readonly interactionSampling?: number
   readonly heartbeatIntervalSeconds?: number
   readonly features?: Partial<SiteTrackerSettings['features']>
+  readonly attributedRevenue?: boolean
 }
 
 /**
@@ -225,6 +228,9 @@ export async function upsertSiteIngestSettings(
     ...(input.features?.heartbeat === undefined
       ? {}
       : { featureHeartbeat: input.features.heartbeat }),
+    ...(input.attributedRevenue === undefined
+      ? {}
+      : { attributedRevenue: input.attributedRevenue }),
   }
 
   return db.transaction(async (tx) => {

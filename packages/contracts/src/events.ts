@@ -552,6 +552,16 @@ export const trackerConfigSchema = z.strictObject({
     heartbeat: z.boolean(),
   }),
   /**
+   * Whether this site's browsers may send the revenue-linking hint — the
+   * `order_id` property of a `conversion` event (ADR-0033 D6 signal 1).
+   *
+   * Outside `features` on purpose: those are measurement signals and default
+   * on, and this one defaults **off** (ADR-0064 D4a). It is not consent and
+   * does not stand in for it — the hint needs both this flag and a granted
+   * consent, and the tracker checks them in that order.
+   */
+  attributed_revenue: z.boolean(),
+  /**
    * Dashboard-defined no-code rules the tracker runtime evaluates (ADR-0034).
    *
    * **This shape changed in M13, deliberately.** M4 guessed it against no

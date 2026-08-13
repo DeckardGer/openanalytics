@@ -78,6 +78,19 @@ export interface SiteTrackerSettings {
   readonly interactionSampling: number
   readonly heartbeatIntervalSeconds: number
   readonly features: TrackerFeatureFlags
+  /**
+   * Whether this site's browsers may send the revenue-linking hint (ADR-0064
+   * D4a, migration 0043).
+   *
+   * Deliberately not inside `features`: those are measurement signals and
+   * default on, this is a linking signal and defaults off. It is also not the
+   * same question as consent — the visitor's consent decides whether a hint
+   * *may* be sent, and this decides whether the site wants one at all. The
+   * choice is enforced at the signal, in the browser: with the flag off the
+   * tracker sends no hint even from a visitor who granted consent, so a site
+   * that has not opted in cannot be attributing revenue by accident.
+   */
+  readonly attributedRevenue: boolean
 }
 
 /**
@@ -91,6 +104,10 @@ export interface SiteTrackerSettings {
  * throttle plus its per-pageview ceiling already bound the volume.
  *
  * The heartbeat interval matches the tracker's own `HEARTBEAT_INTERVAL_SECONDS`.
+ *
+ * `attributedRevenue` is the one value here that is off by default, and the
+ * reason is the one ADR-0064 turns on: everything else is measurement, and this
+ * is the flag that lets a browser send a hint tying a visitor to an order.
  */
 export const DEFAULT_TRACKER_SETTINGS: SiteTrackerSettings = {
   timezone: 'UTC',
@@ -103,4 +120,5 @@ export const DEFAULT_TRACKER_SETTINGS: SiteTrackerSettings = {
     interactions: true,
     heartbeat: true,
   },
+  attributedRevenue: false,
 }

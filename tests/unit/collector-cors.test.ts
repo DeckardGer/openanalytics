@@ -70,6 +70,7 @@ const TRACKER_CONFIG: TrackerConfigRecord = {
     interaction_sampling: 1,
     heartbeat_interval_seconds: 15,
     features: { web_vitals: true, engagement: true, interactions: true, heartbeat: true },
+    attributed_revenue: false,
     no_code_rules: [],
   },
 }

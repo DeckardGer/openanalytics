@@ -1,0 +1,36 @@
+-- Per-site attributed revenue: the site chooses whether its visitors' browsers
+-- send a revenue-linking hint at all (ADR-0064 D4a, amending ADR-0033 D6).
+--
+-- Rollout note: additive — one column on an existing optional settings row, with
+-- a default, no backfill and no change to any other table, column, constraint or
+-- index. It applies to a live database and nothing behaves differently until a
+-- dashboard change writes a row (forward-only; applied migrations are never
+-- edited — D-214).
+--
+-- Why the default is `false` while every other flag in this table defaults
+-- `true`. The rest of the family are measurement signals: web vitals,
+-- engagement, heatmap clicks, heartbeats. They are on by default because a site
+-- that installed an analytics script asked to be measured. This one is not a
+-- measurement signal — it decides whether the browser sends `order_id`, the
+-- property that ties an anonymous visitor to a named customer through the
+-- revenue matcher (ADR-0033 D6 signal 1). A site turns that on deliberately,
+-- after it has decided how it will ask its visitors for consent, and defaulting
+-- it on would have every existing site start sending a linking hint because of
+-- a migration nobody read.
+--
+-- Why it lives here rather than beside the revenue credential. Two reasons, and
+-- the second is the load-bearing one: this table is what `GET /v1/tracker/config`
+-- is built from, so a flag here reaches the browser through machinery that
+-- already exists; and the choice must hold whether or not a Stripe connection
+-- exists, so that connecting a provider never silently turns a visitor-facing
+-- behaviour on. Disconnecting revenue does not clear it, and does not need to —
+-- with no credential there is nothing for the hint to match against, and a flag
+-- that reset itself would surprise a customer who reconnected.
+--
+-- Cache invalidation is `sites.config_version` (migration 0008), as for every
+-- other column here: `upsertSiteIngestSettings` bumps it in the same
+-- transaction, which moves the ETag, the CDN copy, the tracker's localStorage
+-- copy and the collector's ingest-config cache together.
+
+ALTER TABLE site_ingest_settings
+  ADD COLUMN attributed_revenue boolean NOT NULL DEFAULT false;

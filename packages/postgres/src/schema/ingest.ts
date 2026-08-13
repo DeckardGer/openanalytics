@@ -33,6 +33,10 @@ export const siteIngestSettings = pgTable(
     featureEngagement: boolean('feature_engagement').notNull().default(true),
     featureInteractions: boolean('feature_interactions').notNull().default(true),
     featureHeartbeat: boolean('feature_heartbeat').notNull().default(true),
+    // ADR-0064 D4a (migration 0043). Not a feature flag despite the company it
+    // keeps: it decides whether the browser sends the `order_id` linking hint,
+    // which is why it is the one column here that defaults `false`.
+    attributedRevenue: boolean('attributed_revenue').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

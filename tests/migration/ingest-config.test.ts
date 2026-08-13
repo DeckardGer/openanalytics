@@ -242,6 +242,27 @@ describeIfPostgres('site ingest config resolution', () => {
     expect(again?.settings.redactQueryKeys).toEqual(['token', 'email'])
   })
 
+  it('serves attributed revenue off until a site opts in (ADR-0064 D4a)', async () => {
+    // The one column in this table whose default is `false`, and the reason is
+    // the whole of D4a: with it off the browser sends no revenue-linking hint at
+    // all, so a site that never chose attribution cannot be attributing by
+    // accident. A site with no settings row at all must read the same way.
+    const { siteId, trackingKey } = await newSiteWithKey()
+
+    const beforeAnyRow = await resolveIngestConfig(db, trackingKey)
+    expect(beforeAnyRow?.settings.attributedRevenue).toBe(false)
+
+    // A write that says nothing about it must not turn it on either.
+    await upsertSiteIngestSettings(db, { siteId, timezone: 'Asia/Baku' })
+    expect((await resolveIngestConfig(db, trackingKey))?.settings.attributedRevenue).toBe(false)
+
+    const opted = await upsertSiteIngestSettings(db, { siteId, attributedRevenue: true })
+    const resolved = await resolveIngestConfig(db, trackingKey)
+    expect(resolved?.settings.attributedRevenue).toBe(true)
+    // And it moves the version, because the browser has to hear about it.
+    expect(resolved?.config.configVersion).toBe(opted.configVersion)
+  })
+
   it('refuses a settings row outside the contract bounds', async () => {
     const { siteId } = await newSiteWithKey()
 

@@ -41,6 +41,7 @@ interface TrackerConfigResponse {
   interaction_sampling?: number
   heartbeat_interval_seconds?: number
   features?: Partial<TrackerRuntimeConfig['features']>
+  attributed_revenue?: boolean
   no_code_rules?: TrackerRuntimeConfig['noCodeRules']
 }
 
@@ -56,6 +57,7 @@ export function toRuntimeConfig(response: TrackerConfigResponse): TrackerConfigP
     interactionSampling?: number
     heartbeatIntervalSeconds?: number
     features?: TrackerRuntimeConfig['features']
+    attributedRevenue?: boolean
     noCodeRules?: TrackerRuntimeConfig['noCodeRules']
   } = {}
 
@@ -80,6 +82,13 @@ export function toRuntimeConfig(response: TrackerConfigResponse): TrackerConfigP
     // that disagreement fails in is a rule the dashboard shows as live and the
     // browser silently ignores.
     runtime.noCodeRules = response.no_code_rules
+  }
+  // `=== true` rather than `!== false`, which is how every flag in `features` is
+  // read. The difference is the default a malformed or older response falls back
+  // to, and for this one that has to be off: a cached body from before the field
+  // existed must not read as an opt-in nobody made.
+  if (typeof response.attributed_revenue === 'boolean') {
+    runtime.attributedRevenue = response.attributed_revenue === true
   }
   if (response.features) {
     runtime.features = {

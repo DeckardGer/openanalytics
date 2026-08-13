@@ -5507,6 +5507,19 @@ export interface components {
                 heartbeat: boolean;
             };
             /**
+             * @description Whether this site's browsers may send the revenue-linking hint —
+             *     the `order_id` property of a `conversion` event, which the revenue
+             *     matcher joins a charge to a visitor on (ADR-0033 D6 signal 1).
+             *
+             *     Outside `features` on purpose. Those are measurement signals and
+             *     default on; this one defaults **off** (ADR-0064 D4a), because
+             *     sending it is what turns a count into a link to a named customer.
+             *     It is not a substitute for consent and does not override it: with
+             *     the flag on, the hint still waits for `oa.consent('granted')`; with
+             *     it off, no hint is sent even from a visitor who granted consent.
+             */
+            attributed_revenue: boolean;
+            /**
              * @description Dashboard-defined no-code rules the tracker runtime evaluates
              *     (ADR-0034).
              *

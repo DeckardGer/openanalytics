@@ -184,6 +184,7 @@ export function toTrackerConfig(
     interaction_sampling: resolved.settings.interactionSampling,
     heartbeat_interval_seconds: resolved.settings.heartbeatIntervalSeconds,
     features: { ...resolved.settings.features },
+    attributed_revenue: resolved.settings.attributedRevenue,
     no_code_rules: rules.map((rule) => ({
       rule_id: rule.rule_id,
       name: rule.name,
