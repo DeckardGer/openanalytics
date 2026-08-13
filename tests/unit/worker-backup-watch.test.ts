@@ -3,7 +3,6 @@ import type { Metrics } from '@openanalytics/observability'
 import { describe, expect, it } from 'vitest'
 import {
   BACKUP_DAILY_PREFIX,
-  BACKUP_VERIFY_PREFIX,
   BACKUP_WEEKLY_PREFIX,
   checkBackupsOnce,
 } from '../../apps/worker/src/backup-watch.ts'
@@ -109,40 +108,28 @@ describe('backup watcher — the gauge is the age of a real object', () => {
     expect(gauges.has(WORKER_METRICS.clickhouseBackupAgeSeconds)).toBe(true)
     expect(gauges.get(WORKER_METRICS.clickhouseBackupAgeSeconds)).toBe(NEVER_SECONDS)
     expect(gauges.get(WORKER_METRICS.clickhouseBackupBytes)).toBe(0)
-    // The rehearsal heartbeat obeys the same rule: "no rehearsal has ever
-    // passed" must be loud, not a series that does not exist yet.
-    expect(gauges.get(WORKER_METRICS.clickhouseBackupVerifyAgeSeconds)).toBe(NEVER_SECONDS)
   })
 
-  it('reports the rehearsal marker prefix separately from both backup prefixes', async () => {
-    // The verify gauge is the age of the last PROOF a backup could be read
-    // back (ADR-0052, D9 amendment). It must come from backups/verify/ and
-    // nothing else — a marker written under backups/daily/ would refresh the
-    // daily gauge and mask a dead backup timer, which is why the prefix is
-    // its own.
+  it('publishes exactly the gauges the watcher documents — no dial wired to nothing', async () => {
+    // The removed rehearsal gauge is the regression this pins: a gauge over a
+    // prefix nothing in this package writes can only ever publish the ten-year
+    // sentinel, which reads on a dashboard as a permanently broken rehearsal
+    // rather than as an absent feature.
     const { metrics, gauges } = collectMetrics()
     await checkBackupsOnce({
-      storage: storageWith({
-        [BACKUP_DAILY_PREFIX]: {
-          key: 'backups/daily/k2/analytics-20260809T023000Z.zip',
-          size: 1,
-          lastModified: new Date('2026-08-09T02:30:00Z'),
-        },
-        [BACKUP_VERIFY_PREFIX]: {
-          key: 'backups/verify/k2/verify-ok-20260803T041100Z.zip',
-          size: 1,
-          lastModified: new Date('2026-08-03T04:11:00Z'),
-        },
-      }),
+      storage: storageWith({}),
       logger: silentLogger,
       metrics,
       now: () => NOW,
     })
 
-    expect(gauges.get(WORKER_METRICS.clickhouseBackupAgeSeconds)).toBe(34_200)
-    // 6 days, 7 hours, 49 minutes: 6 × 86 400 + 28 140.
-    expect(gauges.get(WORKER_METRICS.clickhouseBackupVerifyAgeSeconds)).toBe(546_540)
-    expect(gauges.get(WORKER_METRICS.clickhouseBackupWeeklyAgeSeconds)).toBe(NEVER_SECONDS)
+    expect([...gauges.keys()].sort()).toEqual(
+      [
+        WORKER_METRICS.clickhouseBackupAgeSeconds,
+        WORKER_METRICS.clickhouseBackupBytes,
+        WORKER_METRICS.clickhouseBackupWeeklyAgeSeconds,
+      ].sort(),
+    )
   })
 
   it('reports the weekly prefix separately from the daily one', async () => {

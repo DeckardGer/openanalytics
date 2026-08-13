@@ -36,14 +36,13 @@ import { WORKER_METRICS } from './ingest/metrics.ts'
 
 export const BACKUP_DAILY_PREFIX = 'backups/daily/'
 export const BACKUP_WEEKLY_PREFIX = 'backups/weekly/'
-/**
- * The weekly restore rehearsal's green markers (ADR-0052, D9 amendment
- * 2026-08-10). backup-verify.sh writes one tiny object here only after a
- * rehearsal has restored, compared and passed — so the age of the newest
- * marker is the age of the last PROOF that a backup can be read back, which
- * is a different fact from the age of the newest backup.
- */
-export const BACKUP_VERIFY_PREFIX = 'backups/verify/'
+// There is deliberately no verify-marker gauge here. A restore rehearsal —
+// something that periodically restores a backup, compares it and writes a
+// green marker — is not part of this package, so a gauge over its markers
+// could only ever publish "never". If a rehearsal is added, the whole bundle
+// arrives together: the job that writes the marker, the gauge that ages it,
+// and the alert that reads the gauge. A gauge alone is a dial wired to
+// nothing, permanently reading the worst value.
 
 export interface BackupWatchDeps {
   readonly storage: ObjectStorage
@@ -85,7 +84,6 @@ export async function checkBackupsOnce(deps: BackupWatchDeps): Promise<void> {
 
   const daily = await deps.storage.newestUnder(BACKUP_DAILY_PREFIX)
   const weekly = await deps.storage.newestUnder(BACKUP_WEEKLY_PREFIX)
-  const verify = await deps.storage.newestUnder(BACKUP_VERIFY_PREFIX)
 
   // An empty prefix is reported as a very large age rather than skipped. A
   // series that simply does not exist until the first backup lands is
@@ -113,13 +111,6 @@ export async function checkBackupsOnce(deps: BackupWatchDeps): Promise<void> {
   deps.metrics.gauge(
     WORKER_METRICS.clickhouseBackupWeeklyAgeSeconds,
     weekly === null ? NEVER_SECONDS : ageSeconds(now, weekly.lastModified),
-  )
-
-  // Same empty-prefix rule as the daily gauge: "no rehearsal has ever passed"
-  // is the loudest state this can be in, not a reason to publish nothing.
-  deps.metrics.gauge(
-    WORKER_METRICS.clickhouseBackupVerifyAgeSeconds,
-    verify === null ? NEVER_SECONDS : ageSeconds(now, verify.lastModified),
   )
 }
 

@@ -416,15 +416,6 @@ export const WORKER_METRICS = {
   /** The same, for `backups/weekly/`. Informational: the weekly object is a
    * retention class, and its absence is already implied by the daily gauge. */
   clickhouseBackupWeeklyAgeSeconds: 'clickhouse_backup_weekly_age_seconds',
-  /**
-   * Seconds since the newest green marker under `backups/verify/` — the weekly
-   * restore rehearsal's heartbeat (ADR-0052, D9 amendment 2026-08-10). Only a
-   * rehearsal that restored, compared and passed writes a marker, so this
-   * gauge ages through a rehearsal that fails every week exactly as it ages
-   * through one that stopped running. Alert threshold is 14 days: one missed
-   * weekly run is a warning-shaped event, two is a broken pipeline.
-   */
-  clickhouseBackupVerifyAgeSeconds: 'clickhouse_backup_verify_age_seconds',
   /** Size of the newest daily archive. A backup that suddenly shrinks by an
    * order of magnitude is a backup of a database that lost its tables. */
   clickhouseBackupBytes: 'clickhouse_backup_bytes',
