@@ -358,10 +358,36 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The generator reads the image tag off the checkout, and the branch that
+      # matters most is the one CI cannot reach by standing still: a release
+      # install. So put HEAD on a tag, run it, and read `.env` back. Getting this
+      # wrong is silent until somebody pastes the quickstart — their
+      # `docker compose pull` then hunts for `openanalytics/migrate:local` on
+      # Docker Hub, which is how it was wrong before.
+      #
+      # Everything this writes is deleted again, so the real run below is the
+      # one whose output the rest of the job uses.
+      - name: The registry, when HEAD is standing on a release tag
+        run: |
+          set -euo pipefail
+          git tag v9.9.9-ci-check
+          ./generate-secrets.sh --domain selfhost.test --email ci@selfhost.test
+          grep -qx 'OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics' .env
+          grep -qx 'OA_IMAGE_TAG=v9.9.9-ci-check' .env
+          docker compose config --images | grep -qx 'ghcr.io/openlabs-so/openanalytics/api:v9.9.9-ci-check'
+          rm -f .env docker-compose.override.yml env/*.env
+          git tag -d v9.9.9-ci-check
+
       # The generator's own happy path, incidentally: twelve env files, the four
-      # names, and the three key pairs, from one run.
+      # names, and the three key pairs, from one run. And with the tag gone, the
+      # other half of the same decision — a checkout that is not a release
+      # builds here, because no registry serves images for an arbitrary commit.
       - name: Generate a configuration
-        run: ./generate-secrets.sh --domain selfhost.test --email ci@selfhost.test
+        run: |
+          set -euo pipefail
+          ./generate-secrets.sh --domain selfhost.test --email ci@selfhost.test
+          grep -qx 'OA_IMAGE_REPO=openanalytics' .env
+          grep -qx 'OA_IMAGE_TAG=local' .env
 
       # Not the point of this job, but free here and it is the assertion that
       # would otherwise wait until somebody ran a release install: with the
