@@ -63,7 +63,7 @@ app.example.com   api.example.com   c.example.com   rt.example.com
 ```sh
 git clone https://github.com/OpenLabs-so/openanalytics
 cd openanalytics
-git checkout v0.1.1          # a release, not main
+git checkout "$(git tag -l 'v*' --sort=-v:refname | sed '/-/d' | head -1)"   # newest release, not main
 cd infra/selfhost
 ./generate-secrets.sh --domain example.com --email you@example.com --with-geoip
 docker compose pull && docker compose up -d

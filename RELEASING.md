@@ -97,10 +97,14 @@ keepable. Not before.
 
 1. `pnpm run verify` and `node scripts/leak-scan.mjs` green on `main`.
 2. Bump `version` in the root `package.json` to the release version, and commit.
-   That commit is the release. Bump the tag written into the quickstart in
-   `README.md` and `SELF-HOSTING.md` in the same commit — those blocks are meant
-   to be pasted, and a paste that installs the previous release is the quiet
-   failure this step exists to prevent.
+   That commit is the release. The quickstarts in `README.md` and
+   `SELF-HOSTING.md` resolve the newest release themselves and need no bump: the
+   checkout line lists the tags, drops every one with a `-` in it, and takes the
+   first, because a candidate sorts above the release it is a candidate for and
+   `git describe` would hand a self-hoster the candidate. The version numbers
+   still spelled out in `SELF-HOSTING.md` are illustrations; refresh them in the
+   same commit so nobody compares a stale number against what they just
+   installed.
 3. `git tag -a v0.1.0 -m "v0.1.0"` and push the tag.
 4. `.github/workflows/release.yml` fires on the tag: it checks the version
    agreement, builds the eight images and pushes them to
