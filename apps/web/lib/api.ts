@@ -72,6 +72,9 @@ export type ApiKeyType = Schemas["ApiKeyType"];
 export type ApiKeyScope = Schemas["ApiKeyScope"];
 export type CreatedApiKey = Schemas["CreatedApiKey"];
 export type PublicDashboardSettings = Schemas["PublicDashboardSettings"];
+export type SiteIngestSettings = Schemas["SiteIngestSettings"];
+export type UpdateSiteIngestSettings =
+  Schemas["UpdateSiteIngestSettingsRequest"];
 export type AnalyticsMeta = Schemas["AnalyticsMeta"];
 export type AnalyticsFreshness = Schemas["AnalyticsFreshness"];
 export type FreshnessState = Schemas["FreshnessState"];
@@ -1199,6 +1202,39 @@ export const publicDashboard = {
     send<PublicDashboardSettings>(
       "PUT",
       `/v1/sites/${siteId}/public-dashboard`,
+      { body }
+    ),
+};
+
+/**
+ * What this site's browsers are configured to do (owner or admin).
+ *
+ * A `PATCH`, not a `PUT`: every field is optional and an absent one means
+ * "leave it alone", so a screen that owns one switch sends one switch and
+ * cannot silently reset the four it does not render. An empty body is a `400`
+ * rather than a no-op.
+ *
+ * A site that has never written these has no settings row at all, and `get`
+ * answers with the product defaults instead of a `404`. That is the state most
+ * sites are in, so it is not an error and callers do not branch on it.
+ *
+ * **Every accepted write bumps `config_version`**, which is what invalidates
+ * the tracker-config ETag, the CDN copy, the browser's cached copy and the
+ * collector's cache together. The new number is in the response, so a caller
+ * can say the save landed. It does not mean browsers have it yet: they hold a
+ * config for about thirty seconds, and any screen that writes this should say
+ * so rather than let somebody test it on their own site and conclude it broke.
+ */
+export const ingestSettings = {
+  get: (siteId: string, options?: RequestOptions) =>
+    api.get<SiteIngestSettings>(
+      `/v1/sites/${encodeURIComponent(siteId)}/ingest-settings`,
+      options
+    ),
+  update: (siteId: string, body: UpdateSiteIngestSettings) =>
+    send<SiteIngestSettings>(
+      "PATCH",
+      `/v1/sites/${encodeURIComponent(siteId)}/ingest-settings`,
       { body }
     ),
 };

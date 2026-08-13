@@ -10,6 +10,7 @@ import {
   ProviderMark,
   ProviderRowsSkeleton,
 } from "@/components/dashboard/provider-card";
+import { RevenueModeChoice } from "@/components/dashboard/revenue-mode-choice";
 import {
   SectionHeading,
   SettingsPanel,
@@ -21,6 +22,7 @@ import { SkeletonBar, SkeletonReveal } from "@/components/ui/skeleton-reveal";
 import { useApiResource } from "@/hooks/use-api-resource";
 import {
   ApiError,
+  ingestSettings,
   LIVE_API,
   revenue,
   type RevenueConnection,
@@ -275,8 +277,100 @@ export function IntegrationsSection({ site }: { site: SiteSummary }) {
           ) : null}
         </SkeletonReveal>
       </SettingsPanel>
+      <RevenueModePanel
+        canManage={canManage}
+        revealed={revealed}
+        siteId={site.site_id}
+      />
       <AlertsPanel revealed={revealed} />
     </>
+  );
+}
+
+/**
+ * The same choice the connect flow's second step makes, for the far more
+ * common case: somebody who connected months ago and is deciding now.
+ *
+ * It sits under Revenue rather than in General because this is where a customer
+ * comes when journeys have no money in them, and it is the answer to that. The
+ * flag itself is a site ingest setting and holds with no provider connected at
+ * all (ADR-0064 D4a), so the panel does not gate on a connection: a site that
+ * disconnected Stripe still gets to decide what its pages send.
+ *
+ * A viewer sees the choice and cannot move it. `PATCH /ingest-settings` is
+ * owner and admin, and discovering that through a `403` on the first click is
+ * worse than a control that was never live.
+ */
+function RevenueModePanel({
+  canManage,
+  revealed,
+  siteId,
+}: {
+  canManage: boolean;
+  revealed: boolean;
+  siteId: string;
+}) {
+  const load = React.useCallback(async (): Promise<boolean> => {
+    if (!LIVE_API) return false;
+    // Only one field of the row is this panel's business. A site that has
+    // never written these settings has no row and the endpoint answers with
+    // the product defaults, so there is no not-configured branch to draw.
+    const settings = await ingestSettings.get(siteId);
+    return settings.attributed_revenue;
+  }, [siteId]);
+
+  const resource = useApiResource(load);
+
+  /**
+   * Reflected only after the server confirms, like every other write on this
+   * screen. The radio therefore does not move under the pointer and then move
+   * back if the `PATCH` fails, which on a control that changes what visitors'
+   * browsers do is the wrong way round.
+   */
+  const [confirmed, setConfirmed] = React.useState<boolean | null>(null);
+  const value =
+    confirmed ?? (resource.status === "ready" ? resource.data : false);
+
+  const write = useAction(async (next: boolean) => {
+    if (LIVE_API) await ingestSettings.update(siteId, {
+      attributed_revenue: next,
+    });
+    setConfirmed(next);
+  });
+
+  return (
+    <SettingsPanel title="Revenue mode">
+      <SkeletonReveal
+        ready={revealed && resource.status !== "loading"}
+        skeleton={<SkeletonBar className="h-28 w-full rounded-lg" />}
+      >
+        {resource.status === "error" ? (
+          <ApiErrorPanel error={resource.error} onRetry={resource.retry} />
+        ) : (
+          <div className="flex flex-col gap-3">
+            <RevenueModeChoice
+              disabled={!canManage || write.busy}
+              onValueChange={(next) => write.run(next)}
+              value={value}
+            />
+            {/* The gap between "saved" and "in effect" is real and small, and
+                naming it here is cheaper than the support thread from somebody
+                who flipped this, reloaded their own site, saw the old
+                behaviour and concluded the switch does nothing. */}
+            <p className="text-xs leading-5 text-muted-foreground">
+              Saved the moment you choose it. Visitors&rsquo; browsers hold
+              their copy of this configuration for about thirty seconds, so a
+              change reaches them a moment later rather than instantly.
+            </p>
+            {write.error ? (
+              <p className="text-xs leading-5 text-destructive-foreground">
+                <strong>{write.error.title}</strong> {write.error.body}
+              </p>
+            ) : null}
+          </div>
+        )}
+      </SkeletonReveal>
+    </SettingsPanel>
   );
 }
 
@@ -415,11 +509,17 @@ function ProviderList({
 /* ------------------------------------------------------------------ */
 
 /**
- * Connecting a provider, in the shared `FlowDialog` shell. Two steps because
- * the work is two acts in two places: step one is what to do *in Stripe*
- * (create a restricted key with the right reads), step two is the one field
- * we need back. The inline form this replaces buried the permissions behind
- * a toggle; here they are the content of their own step.
+ * Connecting a provider, in the shared `FlowDialog` shell. Three steps because
+ * the work is three acts: step one is what to do *in Stripe* (create a
+ * restricted key with the right reads), step two is the one decision only the
+ * customer can make, step three is the one field we need back. The inline form
+ * this replaces buried the permissions behind a toggle; here they are the
+ * content of their own step, and so is the decision.
+ *
+ * **The decision comes before the key, not after it**, because everything is
+ * written by the last button. Connecting first and asking afterwards would
+ * leave a live connection whose mode is whatever the site had before, changeable
+ * only by a customer who has already closed this dialog.
  */
 function ConnectProviderFlow({
   provider,
@@ -432,9 +532,20 @@ function ConnectProviderFlow({
   onClose: () => void;
   onConnected: () => void;
 }) {
-  const [step, setStep] = React.useState<1 | 2>(1);
+  const [step, setStep] = React.useState<1 | 2 | 3>(1);
   const [dir, setDir] = React.useState(1);
   const [apiKey, setApiKey] = React.useState("");
+  /**
+   * ADR-0064 D4a, and `false` is the answer a site that says nothing gets.
+   *
+   * Written on connect whichever way it lands, including `false`: a site
+   * reconnecting after a disconnect may carry `true` from the 0044 backfill,
+   * and leaving that alone would turn a linking behaviour back on for somebody
+   * who just chose totals on this screen.
+   */
+  const [attributed, setAttributed] = React.useState(false);
+  /** A connection that came up while its mode did not. See `connect`. */
+  const [modeUnsaved, setModeUnsaved] = React.useState(false);
   /**
    * A `404` here is the feature probe answering, not a missing site: connect
    * is registered only where the deployment holds a credential keyring. It
@@ -442,13 +553,14 @@ function ConnectProviderFlow({
    */
   const [unsupported, setUnsupported] = React.useState(false);
 
-  const goTo = (next: 1 | 2) => {
+  const goTo = (next: 1 | 2 | 3) => {
     setDir(next > step ? 1 : -1);
     setStep(next);
   };
 
   const connect = useAction(async () => {
     setUnsupported(false);
+    setModeUnsaved(false);
     if (LIVE_API) {
       try {
         await revenue.connect(siteId, {
@@ -462,6 +574,22 @@ function ConnectProviderFlow({
         }
         throw raised;
       }
+      /**
+       * Two calls, and only the first one is the connection. If the mode fails
+       * to save we do NOT unwind the connection: it is live, ingesting and
+       * useful, and tearing it down over a settings write would be the larger
+       * loss. The dialog says which half landed and where to finish, instead of
+       * reporting a failure that would send somebody looking for a connection
+       * that is already there.
+       */
+      try {
+        await ingestSettings.update(siteId, {
+          attributed_revenue: attributed,
+        });
+      } catch {
+        setModeUnsaved(true);
+        return;
+      }
     }
     setApiKey("");
     onConnected();
@@ -469,13 +597,14 @@ function ConnectProviderFlow({
 
   const stepTitles = {
     1: `Connect ${provider.display_name}`,
-    2: "Paste your restricted key",
+    2: "How revenue is measured",
+    3: "Paste your restricted key",
   } as const;
 
   return (
     <FlowDialog
       ariaLabel={stepTitles[1]}
-      counter={`${step} / 2`}
+      counter={`${step} / 3`}
       dir={dir}
       onClose={onClose}
       panelKey={step}
@@ -490,9 +619,20 @@ function ConnectProviderFlow({
               Continue
             </Button>
           </>
-        ) : (
+        ) : step === 2 ? (
           <>
             <Button variant="ghost" size="xs" onClick={() => goTo(1)}>
+              Back
+            </Button>
+            {/* Never disabled: one of the two is always chosen, and the
+                default is the answer that asks nothing of anybody. */}
+            <Button size="xs" onClick={() => goTo(3)}>
+              Continue
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" size="xs" onClick={() => goTo(2)}>
               Back
             </Button>
             <Button
@@ -560,6 +700,22 @@ function ConnectProviderFlow({
             ))}
           </dl>
         </div>
+      ) : step === 2 ? (
+        <div className="flex flex-col gap-3 p-4">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Both modes read the same payments. The difference is whether your
+            pages send anything about the visitor who made one, and that is
+            yours to decide rather than ours to assume.
+          </p>
+          <RevenueModeChoice
+            onValueChange={setAttributed}
+            value={attributed}
+          />
+          <p className="text-xs leading-5 text-muted-foreground">
+            You can change this later under Settings, and nothing about it is
+            permanent.
+          </p>
+        </div>
       ) : (
         <div className="flex flex-col gap-3 p-4">
           <label className="flex flex-col gap-1.5">
@@ -596,6 +752,19 @@ function ConnectProviderFlow({
               This deployment cannot connect a payment provider;
               it has no credential store configured. Nothing is
               wrong with your key.
+            </p>
+          ) : null}
+          {modeUnsaved ? (
+            // Half-landed, and saying so beats a bare failure: the
+            // connection is up and working, only the mode is not
+            // what was picked a step ago.
+            <p className="text-xs leading-5 text-muted-foreground">
+              <strong className="text-foreground/80">
+                {provider.display_name} is connected
+              </strong>{" "}
+              and already ingesting, but the revenue mode did not
+              save. It is still whatever it was before. Set it
+              under Settings, Ingest.
             </p>
           ) : null}
           {connect.error ? (
