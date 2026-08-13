@@ -97,7 +97,10 @@ keepable. Not before.
 
 1. `pnpm run verify` and `node scripts/leak-scan.mjs` green on `main`.
 2. Bump `version` in the root `package.json` to the release version, and commit.
-   That commit is the release.
+   That commit is the release. Bump the tag written into the quickstart in
+   `README.md` and `SELF-HOSTING.md` in the same commit — those blocks are meant
+   to be pasted, and a paste that installs the previous release is the quiet
+   failure this step exists to prevent.
 3. `git tag -a v0.1.0 -m "v0.1.0"` and push the tag.
 4. `.github/workflows/release.yml` fires on the tag: it checks the version
    agreement, builds the eight images and pushes them to
