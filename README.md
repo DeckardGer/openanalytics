@@ -66,25 +66,17 @@ cd openanalytics
 git checkout v0.1.0          # a release, not main
 cd infra/selfhost
 ./generate-secrets.sh --domain example.com --email you@example.com --with-geoip
-```
-
-The generator writes defaults that build the images here. Point the two at the
-release you just checked out instead:
-
-```sh
-# infra/selfhost/.env
-OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics
-OA_IMAGE_TAG=v0.1.0
-```
-
-```sh
 docker compose pull && docker compose up -d
 # then open https://app.example.com and create the first account
 ```
 
-The version appears twice on purpose. The compose file, the env templates and
-the migrations ship _with_ the images, so the checkout and the image tag are one
-version or the install is a configuration nobody has tested.
+**The checkout is where the version is chosen, and it is chosen once.** The
+generator reads the tag back out of the tree it is standing in and points `.env`
+at that release's images, printing which it picked and why; on a branch, on
+`main`, or with no git at all it writes the build defaults instead. That is not
+a convenience — the compose file, the env templates and the migrations ship
+_with_ the images, so a release's images against another tree is a configuration
+nobody has tested.
 
 Images are amd64. On arm64, or to run a branch, build the eight here instead:
 same compose file, one flag, about ten minutes and swap on a 4 GB box. Later,

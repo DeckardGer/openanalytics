@@ -45,8 +45,9 @@
 #    a name no registry serves, so compose builds it here, which is what this
 #    file did before releases existed and still does from a `git clone` of main.
 #
-#    A release install sets both in `.env` (`./generate-secrets.sh` writes them,
-#    and `./upgrade.sh` maintains them):
+#    A release install has both in `.env` without typing them:
+#    `./generate-secrets.sh` writes them when it is run from a checkout standing
+#    on a release tag, and `./upgrade.sh` rewrites them on the way to the next:
 #
 #      OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics
 #      OA_IMAGE_TAG=v0.1.0

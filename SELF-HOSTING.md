@@ -77,7 +77,10 @@ generator says so and finishes anyway.
 
 That writes, in one pass so the values that must match actually do:
 
-- `.env` — the four names and the compose network. No secrets.
+- `.env` — the four names, the compose network, and which images to run. No
+  secrets. The images are read back out of the checkout: stand on a release tag
+  and it points at that release's published images, stand anywhere else and it
+  writes the defaults that build them here. It prints which it chose.
 - `env/*.env` — **one file per service**, with generated passwords.
 - `docker-compose.override.yml` — three Ed25519 key pairs as YAML block
   scalars, split across the services entitled to each half.
@@ -89,25 +92,28 @@ further** — see [Losing a secret](#losing-a-secret).
 
 A release publishes **eight images** — `migrate`, `tracker-build`, `api`,
 `collector`, `worker`, `query-gateway`, `realtime`, `web` — so an install pulls
-them instead of compiling them. Point `.env` at the registry and the tag you
-checked out:
+them instead of compiling them. The generator has already pointed `.env` at
+them, because you checked out the tag before running it:
 
 ```sh
-# in infra/selfhost/.env
-OA_IMAGE_REPO=ghcr.io/openlabs-so/openanalytics
-OA_IMAGE_TAG=v0.1.0
-```
-
-```sh
+grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.1.0
 docker compose pull
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
 docker compose ps                  # everything but migrate/tracker-build healthy
 ```
 
-**Keep the two the same version as the checkout.** Running a release's images
-from a different release's tree is not a supported configuration: the migrations
-and the env templates belong to the version too.
+If that `grep` says `openanalytics` and `local` instead, the generator did not
+find a release tag on `HEAD` — it says so when it runs — and wrote the build
+defaults. Either build (below), or edit those two lines by hand: they are the
+whole of what this decision touches, and nothing else in `.env` depends on them.
+Do **not** re-run the generator to fix it. That needs `--force`, and `--force`
+replaces every secret it wrote.
+
+**The image tag and the checkout are one version, which is why the generator
+derives one from the other.** Running a release's images from a different
+release's tree is not a supported configuration: the migrations and the env
+templates belong to the version too.
 
 Images are published for **amd64 only**. On arm64 — a Hetzner CAX box, an Apple
 Silicon machine — build them instead, which is what the paragraph below is
@@ -115,12 +121,17 @@ about. Everything else is identical.
 
 #### Building instead of pulling
 
-Leave `OA_IMAGE_REPO` and `OA_IMAGE_TAG` as the generator wrote them
-(`openanalytics` and `local`) and compose builds all eight here:
+`OA_IMAGE_REPO=openanalytics` and `OA_IMAGE_TAG=local` name images no registry
+serves, which is what makes compose build all eight here:
 
 ```sh
 docker compose up -d --build
 ```
+
+On a branch or on `main` the generator already wrote those two — building is
+what a tree with no published images can do. On a release checkout it wrote the
+registry instead, so set them back by hand first, or `./upgrade.sh
+--from-source`, which does the same and takes a snapshot before it starts.
 
 **On a 4 GB host, add swap first.** TypeScript and Next both want more memory
 than a 4 GB box has spare while the stores are already running. Without it a

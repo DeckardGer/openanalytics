@@ -192,10 +192,60 @@ describe('the upgrade path', () => {
       expect(source, `${script} does not set OA_IMAGE_TAG`).toContain('set_env OA_IMAGE_TAG')
     }
   })
+})
 
-  it('is what the generator writes into a fresh .env', () => {
-    const generator = read('infra/selfhost/generate-secrets.sh')
-    expect(generator).toContain('OA_IMAGE_REPO=openanalytics')
-    expect(generator).toContain('OA_IMAGE_TAG=local')
+/**
+ * The generator picks the two image variables from the checkout it is standing
+ * in, rather than writing build defaults and leaving the operator a step the
+ * README has to remember to spell out. Getting this wrong is silent in exactly
+ * the way that matters: a release install that pasted the quickstart fails at
+ * `docker compose pull` looking for `openanalytics/migrate:local`, an image no
+ * registry has ever served.
+ *
+ * Text checks, because the decision lives in shell. What they pin is that both
+ * branches exist, that the tag branch uses the same `--exact-match` idiom as
+ * `upgrade.sh` — a checkout merely NEAR a tag is not that tag, and its images do
+ * not exist — and that the registry is spelled the same in both scripts.
+ */
+describe('the images generate-secrets.sh writes into a fresh .env', () => {
+  const generator = read('infra/selfhost/generate-secrets.sh')
+  const upgrade = read('infra/selfhost/upgrade.sh')
+
+  it('come from the registry when HEAD is standing on a release tag', () => {
+    expect(generator).toContain('git -C ../.. describe --tags --exact-match HEAD')
+    expect(generator).toMatch(/RELEASE_REPO="ghcr\.io\/openlabs-so\/openanalytics"/)
+    expect(generator).toMatch(/IMAGE_REPO="\$RELEASE_REPO"/)
+    expect(generator).toMatch(/IMAGE_TAG="\$HEAD_TAG"/)
+  })
+
+  it('are built here on a branch, on main, or with no git at all', () => {
+    expect(generator).toMatch(/IMAGE_REPO="openanalytics"/)
+    expect(generator).toMatch(/IMAGE_TAG="local"/)
+  })
+
+  it('only call a v-prefixed tag a release, as upgrade.sh does', () => {
+    // Without the guard, a checkout on some other annotated tag — `nightly`,
+    // a fork's own — would point .env at images that were never published.
+    expect(generator).toMatch(/^\s*v\[0-9\]\*\)$/m)
+    expect(upgrade).toMatch(/^\s*v\[0-9\]\*\)/m)
+  })
+
+  it('spell the registry the same as the script that upgrades between releases', () => {
+    const spelling = /ghcr\.io\/openlabs-so\/openanalytics/
+    expect(spelling.exec(generator)?.[0]).toBe(spelling.exec(upgrade)?.[0])
+  })
+
+  it('reach .env through the chosen values, not a hard-coded pair', () => {
+    // The heredoc used to write `OA_IMAGE_REPO=openanalytics` literally. If it
+    // does again, every branch above is dead code that still passes its test.
+    expect(generator).toContain('OA_IMAGE_REPO=${IMAGE_REPO}')
+    expect(generator).toContain('OA_IMAGE_TAG=${IMAGE_TAG}')
+    expect(generator).not.toMatch(/^OA_IMAGE_REPO=openanalytics$/m)
+    expect(generator).not.toMatch(/^OA_IMAGE_TAG=local$/m)
+  })
+
+  it('say which of the two it chose, and why, when it runs', () => {
+    expect(generator).toMatch(/IMAGE_MODE=/)
+    expect(generator).toMatch(/echo "images: \$\{IMAGE_MODE\}"/)
   })
 })
