@@ -886,13 +886,25 @@ export function RealtimeBoard() {
 
   // The hero says who with marks, not words: flag, browser, OS and device as
   // icons under the name (each carries its label for hover and screen
-  // readers), with only the two time facts spelled out below.
-  const details: Array<[string, React.ReactNode]> = active
+  // readers), with the time facts spelled out below.
+  //
+  // **Where they are is the third fact, and the board already knew it.** The
+  // row renders the presence `path`; the modal had the same visitor object in
+  // scope and printed only the two times. That is how this panel could say it
+  // had no pageviews for somebody standing on a page: the trail is keyed on an
+  // anonymous id, presence is not, and the modal was showing only the half
+  // that can be empty.
+  const details: Array<{
+    label: string;
+    value: React.ReactNode;
+    /** Full width on its own row: a path is longer than half a grid column. */
+    wide?: boolean;
+  }> = active
     ? [
-        ["First seen", timeAgo(firstSeenAgoS)],
-        [
-          "Last seen",
-          active.online ? (
+        { label: "First seen", value: timeAgo(firstSeenAgoS) },
+        {
+          label: "Last seen",
+          value: active.online ? (
             <span
               key="online"
               className="flex items-center justify-center gap-1.5 text-success-foreground"
@@ -903,7 +915,23 @@ export function RealtimeBoard() {
           ) : (
             timeAgo(active.secondsAgo)
           ),
-        ],
+        },
+        // Presence only. Rows built from the recent-visitors read carry
+        // `currentPath: null`, and for those the trail below is the answer
+        // rather than a path they left some time ago.
+        ...(active.currentPath === null
+          ? []
+          : [
+              {
+                label: "Currently on",
+                value: (
+                  <span className="block truncate" title={active.currentPath}>
+                    {active.currentPath}
+                  </span>
+                ),
+                wide: true,
+              },
+            ]),
       ]
     : [];
 
@@ -1133,13 +1161,18 @@ export function RealtimeBoard() {
                         ) : null}
 
                         <div className="grid grid-cols-2 gap-x-10 gap-y-5">
-                          {details.map(([label, value]) => (
-                            <div key={label}>
+                          {details.map((detail) => (
+                            <div
+                              className={
+                                detail.wide ? "col-span-2 min-w-0" : undefined
+                              }
+                              key={detail.label}
+                            >
                               <p className="text-xs text-muted-foreground">
-                                {label}
+                                {detail.label}
                               </p>
                               <div className="mt-1 text-sm font-medium">
-                                {value}
+                                {detail.value}
                               </div>
                             </div>
                           ))}
@@ -1194,10 +1227,26 @@ export function RealtimeBoard() {
                               // sit under the previous one. Both read as
                               // "here now, nothing behind them", and neither
                               // resolves by waiting.
+                              //
+                              // Where they are leads, where presence knows it.
+                              // The reader opened this row to find out what
+                              // somebody is doing, and the one fact that
+                              // answers that should not sit behind the reason
+                              // the rest of the panel is empty.
                               <motion.p
                                 variants={MODAL_ITEM}
                                 className="px-2 py-4 text-center text-sm leading-6 text-muted-foreground"
                               >
+                                {active !== null &&
+                                active.currentPath !== null ? (
+                                  <>
+                                    On{" "}
+                                    <span className="font-medium text-foreground">
+                                      {active.currentPath}
+                                    </span>{" "}
+                                    right now.{" "}
+                                  </>
+                                ) : null}
                                 No pageviews recorded for this visitor in the
                                 last 24 hours. Presence is refreshed by any
                                 activity, so somebody can be here without one.
