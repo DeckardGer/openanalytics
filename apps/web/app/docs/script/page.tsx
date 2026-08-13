@@ -43,7 +43,11 @@ export default function ScriptOptionsPage() {
             ],
             [
               <Code key="e">data-require-consent</Code>,
-              "Collect nothing until your consent banner calls oa.consent('granted'). Off by default, because the tracker is cookieless.",
+              "Collect nothing until your consent banner calls oa.consent('granted'). Off by default, because measurement here is aggregate and first-party.",
+            ],
+            [
+              <Code key="f">data-storage=&quot;none&quot;</Code>,
+              "Strict mode: the script neither writes to nor reads from localStorage and sessionStorage. The per-tab session hint, the offline queue and the consent state then last one page load, and #oa-ignore does not work.",
             ],
           ]}
         />

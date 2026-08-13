@@ -31,6 +31,26 @@ export default function IdentifyPage() {
         </p>
       </DocSection>
 
+      <DocSection title="It carries a consent obligation, and it is yours">
+        <p>
+          Recognising a person across visits is not ordinary audience
+          measurement, so the reasoning that lets most sites run this script
+          without a banner does not cover this call. You are the controller for
+          it: the script sends what your code tells it to, and we do not hold it
+          back on a consent state we cannot see.
+        </p>
+        <p>
+          Decide how you ask, then wire the answer. If you use a banner or a
+          preference centre, tell the script:
+        </p>
+        <DocCode caption="wherever you record the visitor's choice">{`oa.consent("granted"); // or "denied" — denied stops everything, immediately`}</DocCode>
+        <p>
+          Calling <Code>oa.identify()</Code> only after your own consent check
+          is the straightforward pattern, and it is the one our privacy notice
+          template describes for site owners.
+        </p>
+      </DocSection>
+
       <DocSection title="The rules">
         <DocList
           items={[

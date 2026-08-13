@@ -18,13 +18,17 @@ export default function PrivacyDocsPage() {
     <DocArticle page={page}>
       <DocSection title="The short version">
         <p>
-          The tracker sets no cookies, stores nothing on the visitor&apos;s
-          device, never keeps a raw IP address, and counts visitors with a
-          keyed hash that expires at UTC midnight and differs on every site.
-          These are design properties of the software, not policies: they
-          hold because of how the tracker and the collector are built, so
-          they hold on your deployment without you configuring anything.
-          Every exception is named further down this page.
+          The tracker sets no cookies, stores no identifier for the visitor on
+          their device, never keeps a raw IP address, and counts visitors with
+          a keyed hash that expires at UTC midnight and differs on every site.
+          What it does keep in the browser is four short-lived technical
+          values — a per-tab session hint, an offline queue, the consent state
+          and a five-minute config cache — and{" "}
+          <Code>data-storage=&quot;none&quot;</Code> removes even those. These
+          are design properties of the software, not policies: they hold
+          because of how the tracker and the collector are built, so they hold
+          on your deployment without you configuring anything. Every exception
+          is named further down this page.
         </p>
       </DocSection>
 
@@ -40,10 +44,15 @@ export default function PrivacyDocsPage() {
 
       <DocSection title="The consent API">
         <p>
-          Most sites need no banner for this tracker, because nothing is
-          stored on the device and nothing personal is collected. If your
-          legal position wants explicit consent anyway, two pieces:
+          Most sites need no banner for measurement with this tracker: it is
+          first-party, aggregate, never combined across sites and never shared
+          onward. Two features go beyond that —{" "}
+          <DocLink slug="identify">identify</DocLink> and attributed revenue,
+          which link a visitor to a person or an order. Your code calls those,
+          so the consent question for them is yours; the script gives you the
+          hook rather than deciding for you.
         </p>
+        <p>If your legal position wants explicit consent for all of it:</p>
         <DocCode caption="gate collection until consent">{`<script
   async
   src="${COLLECTOR_BASE_URL}/oa.js"
@@ -57,7 +66,7 @@ oa.consent("denied");`}</DocCode>
         <DocList
           items={[
             "With data-require-consent, nothing is collected until granted.",
-            "Denied is final for that visitor regardless of any other setting, and the choice persists in localStorage on their device.",
+            "Denied is final for that visitor regardless of any other setting, and the choice persists in localStorage on their device — or for the page only, in strict mode.",
             "Every signal the script could send passes through one decision point; there is no path around it.",
           ]}
         />

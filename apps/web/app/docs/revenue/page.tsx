@@ -25,6 +25,25 @@ export default function RevenueDocsPage() {
         </p>
       </DocSection>
 
+      <DocSection title="Attribution is opt-in, and it asks something of you">
+        <p>
+          Revenue totals need nothing from your visitors. Tying a payment back
+          to the visit that produced it is different on both counts: you turn{" "}
+          <strong>Attributed revenue</strong> on when connecting Stripe — until
+          you do, the script sends no <Code>order_id</Code> at all and the
+          conversion is just a count — and the linking itself carries a consent
+          obligation you meet as the controller of your site.
+        </p>
+        <DocCode caption="wherever you record the visitor's choice">{`oa.consent("granted"); // or "denied", which stops collection entirely`}</DocCode>
+        <p>
+          We do not hold the hint back on a consent state we cannot see, so
+          wiring this is yours to do. The best place to ask is your own checkout
+          page: consent collected inside Stripe Checkout is consent for taking
+          payment, and the analytics link is a different purpose with a
+          different controller — you.
+        </p>
+      </DocSection>
+
       <DocSection title="Recipe 1: the order_id conversion (the strong one)">
         <p>Fire a conversion on your success page carrying the order:</p>
         <DocCode caption="success page">{`oa.conversion("purchase", { order_id: "cs_live_a1B2c3" });`}</DocCode>
