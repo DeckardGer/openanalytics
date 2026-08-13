@@ -1,3 +1,17 @@
+import { execFileSync } from 'node:child_process'
+import { createPrivateKey, generateKeyPairSync } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  SIGNATURE_HEADERS,
+  canonicalSigningString,
+  loadVerifyKey,
+  sha256Hex,
+  signRequest,
+  signedPathOf,
+  verifySignature,
+} from '@openanalytics/auth'
 import {
   EnvValidationError,
   POLICY_SCOPE,
@@ -6,7 +20,7 @@ import {
   loadServiceEnv,
 } from '@openanalytics/domain'
 import { testEnv } from '@openanalytics/testkit'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 describe('service environment', () => {
   it('loads a valid environment and merges policy defaults', () => {
@@ -318,6 +332,171 @@ describe('service environment', () => {
       expect(error).toBeInstanceOf(EnvValidationError)
       const issues = (error as EnvValidationError).issues
       expect(issues.length).toBeGreaterThanOrEqual(3)
+    }
+  })
+})
+
+describe('file-backed environment variables', () => {
+  // The self-host marketplaces (Coolify, Openship and the template catalogues
+  // shaped like them) can generate a random string into a variable and nothing
+  // else, so a keypair whose halves must match across two services has to reach
+  // the services as files written by a one-shot step in the stack.
+  let dir: string
+  let privatePem: string
+  let publicPem: string
+  let privatePath: string
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'oa-env-file-'))
+    // A real Ed25519 pair, in the PEM shape `openssl genpkey -algorithm ed25519`
+    // writes — trailing newline included, because that is what the generator
+    // produces and therefore what the loader has to cope with.
+    const pair = generateKeyPairSync('ed25519')
+    privatePem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+    publicPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+    privatePath = join(dir, 'query.private.pem')
+    writeFileSync(privatePath, privatePem)
+    writeFileSync(join(dir, 'query.public.pem'), publicPem)
+    writeFileSync(join(dir, 'empty.pem'), '   \n')
+  })
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('refuses to start the gateway with the private half handed over as a FILE', () => {
+    // THE test. The forbidden-key check reads variable NAMES, so a `_FILE`
+    // variable resolved after that check would carry the minting key straight
+    // past the boundary it exists to hold — and the gateway would come up green
+    // able to sign the envelopes it is only supposed to verify. Resolution
+    // therefore happens BEFORE the check, and this pins that ordering.
+    expect(() =>
+      loadServiceEnv('query-gateway', testEnv({ QUERY_SIGNING_PRIVATE_KEY_FILE: privatePath })),
+    ).toThrow(/least-privilege secret boundary/)
+  })
+
+  it('reads a value from the file the path names, without its trailing newline', () => {
+    const env = loadServiceEnv('api', testEnv({ QUERY_SIGNING_PRIVATE_KEY_FILE: privatePath }))
+
+    expect(env.QUERY_SIGNING_PRIVATE_KEY).toBe(privatePem.trim())
+    expect(env.QUERY_SIGNING_PRIVATE_KEY?.endsWith('\n')).toBe(false)
+    // Still a usable key after the trim, not just a matching string. Parsed
+    // rather than pattern-matched: it is the stronger check, and it keeps a
+    // key-shaped literal out of the tree — the pattern this replaced tripped
+    // the public mirror's leak scan, which is a pre-merge gate there.
+    expect(() => createPrivateKey(env.QUERY_SIGNING_PRIVATE_KEY as string)).not.toThrow()
+  })
+
+  it('refuses a variable given as both a value and a file', () => {
+    // Silently preferring one would mean a deployment running on a key nobody
+    // in the room could name.
+    expect(() =>
+      loadServiceEnv(
+        'api',
+        testEnv({
+          QUERY_SIGNING_PRIVATE_KEY: privatePem,
+          QUERY_SIGNING_PRIVATE_KEY_FILE: privatePath,
+        }),
+      ),
+    ).toThrow(/not both/)
+  })
+
+  it('refuses to start when the file is missing, and names the path but never a value', () => {
+    const missing = join(dir, 'absent.pem')
+    try {
+      loadServiceEnv('api', testEnv({ QUERY_SIGNING_PRIVATE_KEY_FILE: missing }))
+      expect.unreachable('expected EnvValidationError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError)
+      const message = (error as EnvValidationError).message
+      expect(message).toContain(missing)
+      expect(message).not.toContain(privatePem.slice(0, 64))
+    }
+  })
+
+  it('refuses to start when the file is empty', () => {
+    // A path is an assertion that the value matters. An absent variable may mean
+    // "this feature is off" (the optional-until-used rule); a path pointing at
+    // nothing is a broken deployment, and the gateway would otherwise mount no
+    // query route at all while every health check stayed green.
+    expect(() =>
+      loadServiceEnv('api', testEnv({ QUERY_SIGNING_PRIVATE_KEY_FILE: join(dir, 'empty.pem') })),
+    ).toThrow(/is empty/)
+  })
+
+  it('leaves a _FILE variable alone when no schema declares its base name', () => {
+    // `SSL_CERT_FILE` is OpenSSL's, set on plenty of hosts. Refusing to boot
+    // over somebody else's convention would be a self-inflicted outage.
+    expect(() =>
+      loadServiceEnv('api', testEnv({ SSL_CERT_FILE: '/etc/ssl/certs/ca-certificates.crt' })),
+    ).not.toThrow()
+  })
+
+  it('resolves the verify half the same way, on the service that holds it', () => {
+    const env = loadServiceEnv(
+      'query-gateway',
+      testEnv({ QUERY_SIGNING_PUBLIC_KEY_FILE: join(dir, 'query.public.pem') }),
+    )
+
+    expect(env.QUERY_SIGNING_PUBLIC_KEY).toBe(publicPem.trim())
+  })
+
+  it('carries a pair openssl wrote all the way to a signature the gateway accepts', () => {
+    // The end of the chain, run rather than reasoned about. `openssl genpkey`
+    // is what the keygen one-shot in `docker-compose.keys.yml` runs and what
+    // `generate-secrets.sh` has always run, so these are the exact bytes a
+    // self-hosted install ends up with — including the trailing newline that
+    // the loader has to strip without disturbing anything else. A string that
+    // merely *looks* like a PEM after trimming would pass every other test in
+    // this block; only signing with it proves the key survived.
+    const keys = mkdtempSync(join(tmpdir(), 'oa-env-openssl-'))
+    try {
+      const priv = join(keys, 'query.private.pem')
+      const pub = join(keys, 'query.public.pem')
+      execFileSync('openssl', ['genpkey', '-algorithm', 'ed25519', '-out', priv])
+      execFileSync('openssl', ['pkey', '-in', priv, '-pubout', '-out', pub])
+
+      const api = loadServiceEnv('api', testEnv({ QUERY_SIGNING_PRIVATE_KEY_FILE: priv }))
+      const gateway = loadServiceEnv(
+        'query-gateway',
+        testEnv({ QUERY_SIGNING_PUBLIC_KEY_FILE: pub }),
+      )
+
+      const url = 'https://gateway.internal/v1/query'
+      const body = '{"q":1}'
+      const issuedAt = new Date('2026-08-14T00:00:00.000Z')
+      const headers = signRequest({
+        privateKeyPem: api.QUERY_SIGNING_PRIVATE_KEY as string,
+        keyId: 'k1',
+        audience: 'query-gateway:test',
+        method: 'POST',
+        url,
+        body,
+        nonce: 'n-1',
+        issuedAt,
+        lifetimeMs: 60_000,
+      })
+
+      const canonical = canonicalSigningString({
+        keyId: 'k1',
+        audience: 'query-gateway:test',
+        method: 'POST',
+        path: signedPathOf(url),
+        issuedAt: headers[SIGNATURE_HEADERS.issuedAt] as string,
+        expiresAt: headers[SIGNATURE_HEADERS.expiresAt] as string,
+        nonce: 'n-1',
+        bodySha256: sha256Hex(body),
+      })
+
+      expect(
+        verifySignature({
+          verifyKey: loadVerifyKey(gateway.QUERY_SIGNING_PUBLIC_KEY as string),
+          canonical,
+          signatureBase64: headers[SIGNATURE_HEADERS.signature] as string,
+        }),
+      ).toBe(true)
+    } finally {
+      rmSync(keys, { recursive: true, force: true })
     }
   })
 })

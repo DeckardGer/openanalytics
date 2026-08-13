@@ -353,6 +353,48 @@ signer into `Unknown signing key` rather than a signature failure — the more
 diagnosable of the two. Generate keys **on the host**, not on a workstation
 whose shell history or agent transcript can see them.
 
+### Or hand the services a file instead
+
+Every variable the services read also accepts a path: set `X_FILE` and the value
+is read from the file it names. `QUERY_SIGNING_PRIVATE_KEY_FILE=/keys/query.pem`
+is the same thing as `QUERY_SIGNING_PRIVATE_KEY=<the PEM>`, and it sidesteps the
+multi-line problem above entirely — a file is already the shape a PEM wants.
+
+This exists for installs that never get a shell: the one-click catalogues can
+generate a random string into a variable, but none of them can produce a keypair
+whose halves must match across two services, and `./generate-secrets.sh` is not
+something they can run. `infra/selfhost/docker-compose.keys.yml` is the worked
+example — a one-shot `keygen` step writes the three pairs into four separate
+volumes and each service mounts only its own, read-only:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.keys.yml up -d
+```
+
+Four rules worth knowing before you use it:
+
+- **A path is a promise.** An absent variable can mean "this feature is off";
+  a path pointing at a missing or empty file is a refusal to start. That is the
+  whole point — the alternative is a stack that comes up green with the
+  analytics read surface silently unmounted.
+- **Not both.** Setting `X` and `X_FILE` together is a startup error rather than
+  a silent winner, so nobody ends up running on a key they cannot name.
+- **The boundary still holds.** Paths are resolved before the least-privilege
+  check, so pointing the gateway at the api's private key fails exactly the way
+  pasting that key into the gateway's env has always failed.
+- **Ownership.** The services run as uid 1000 (`node`). A key file written by a
+  root process on a fresh volume must be `chown`ed to it, or the service cannot
+  read its own key. The `keygen` step does this; a hand-rolled equivalent must
+  too.
+
+Trailing newlines are stripped, which is what `openssl` writes and what no key
+parser wants. A `_FILE` variable whose base name no service declares —
+`SSL_CERT_FILE`, say — is left alone.
+
+The overlay has not yet been run on a real host: file modes, volume ownership
+and startup ordering are unverified, so treat it as a reference to adapt rather
+than a supported path, and tell us how it goes.
+
 ### The Valkey URLs are IP addresses on purpose
 
 The connection factory refuses a plaintext `redis://` URL whose host it cannot

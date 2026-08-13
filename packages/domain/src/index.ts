@@ -686,6 +686,7 @@ export {
   describeEnvSurface,
   forbiddenKeysFor,
   loadServiceEnv,
+  resolveEnvFileReferences,
   registerEnvExtension,
   type EnvExtension,
   type EnvVariableDescription,

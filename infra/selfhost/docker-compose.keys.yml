@@ -1,0 +1,162 @@
+# The three signing pairs as FILES, generated inside the stack.
+#
+# USE THIS *INSTEAD OF* the `docker-compose.override.yml` that
+# `./generate-secrets.sh` writes — this route generates its own pairs, so the
+# script's key block has nothing to add.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.keys.yml up -d
+#
+# Passing `-f` at all turns off compose's automatic pickup of
+# `docker-compose.override.yml`, so a previously generated override is simply
+# not in play here; you do not have to delete it. Should you merge both by hand
+# anyway, the api refuses to start rather than picking a winner — the same
+# secret supplied twice, once inline and once as a path, is a hard error.
+#
+# WHY IT EXISTS. `./generate-secrets.sh` needs a shell on the host. The one-click
+# self-host catalogues (Coolify, Openship, and the template catalogues shaped
+# like them) never give you one: you paste a repository URL or pick the app,
+# set your domains, and press deploy. What those platforms can generate for you
+# is a random *string* — no catalogue has a generator that produces a keypair
+# whose two halves must match across two different services. So the pairs have
+# to be made by something inside the stack, and reach the services as files.
+#
+# THE SPLIT IS THE POINT, AND IT SURVIVES. In each pair the api holds the
+# private half and the verifying service holds only the public one, so a
+# compromised verifier can never mint what it checks. Here that split is a
+# filesystem fact rather than an env-var convention: four separate volumes, each
+# service mounting only its own, read-only. A single volume with a shared
+# directory would put every private half one `cat` away from every verifier.
+#
+# Four volumes rather than one volume with sub-paths on purpose — `subpath` is a
+# recent addition to the Compose spec and the catalogues above do not all
+# express it, while "mount this volume there" is the oldest primitive there is.
+
+services:
+  # --- one-shot: the signing pairs -----------------------------------------
+  #
+  # Plain `alpine` rather than one of our own images, because our runtime stage
+  # drops to `USER node` over a root-owned tree and a fresh named volume is
+  # root-owned too: the service that would write the keys is the one process
+  # that cannot. Running the generator as root and handing the results to uid
+  # 1000 afterwards is the version with no ownership guesswork in it.
+  #
+  # `openssl genpkey -algorithm ed25519` is the same command
+  # `./generate-secrets.sh` runs on the host — the key material is produced by
+  # the same tool either way, only the machine it runs on changes.
+  keygen:
+    image: alpine:3
+    container_name: oa-keygen
+    restart: 'no'
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        # `openssl` is not in the alpine base image, so this step needs outbound
+        # network on its FIRST run only — afterwards the keys exist and the loop
+        # below short-circuits before anything is generated.
+        apk add --no-cache openssl >/dev/null
+
+        # EVERY LITERAL DOLLAR IS DOUBLED, in the comments as much as the code.
+        # Compose substitutes dollar-variables throughout a compose file before
+        # the container ever sees it, so a single-dollar `$$pair` below would
+        # reach the shell as an empty string and this script would generate
+        # `/keys/api/.private.pem` three times. `$$` is how a dollar survives
+        # into the container.
+        #
+        # IDEMPOTENT, and this is load-bearing. Platforms re-run the whole stack
+        # on every redeploy. Regenerating would rotate all three pairs behind
+        # everyone's back: the api would mint under a new private half while the
+        # tokens already in visitors' browsers were signed by the old one, and
+        # nothing would say so out loud.
+        #
+        # Each half is written only when it is missing, and a missing public half
+        # is *derived* from the private one rather than the pair being made
+        # again — so a volume interrupted half-written repairs itself, and the
+        # keys already in use are never replaced.
+        #
+        # Never rewriting an existing file is also what keeps the re-run from
+        # depending on privilege: the files this step leaves behind are 0400 and
+        # 0444 inside 0700 directories owned by uid 1000, and `openssl -out`
+        # against one of those fails for anything but root. Skipping instead of
+        # overwriting means the second run does no work it could be refused.
+        for entry in "query gateway" "realtime realtime" "preview collector"; do
+          set -- $$entry
+          pair=$$1
+          dest=$$2
+          if [ ! -f "/keys/api/$$pair.private.pem" ]; then
+            openssl genpkey -algorithm ed25519 -out "/keys/api/$$pair.private.pem"
+            echo "$$pair: private half generated"
+          else
+            echo "$$pair: private half exists, left alone"
+          fi
+          if [ ! -f "/keys/$$dest/$$pair.public.pem" ]; then
+            openssl pkey -in "/keys/api/$$pair.private.pem" -pubout \
+              -out "/keys/$$dest/$$pair.public.pem"
+            echo "$$pair: public half derived for $$dest"
+          fi
+        done
+
+        # uid 1000 is `node` in the runtime image, which is the user every
+        # service runs as. Private halves readable by owner only; public halves
+        # are not secret and are readable by anyone who already has the volume.
+        chown -R 1000:1000 /keys
+        chmod 700 /keys/api /keys/gateway /keys/realtime /keys/collector
+        chmod 400 /keys/api/*.pem
+        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem /keys/collector/*.pem
+        ls -l /keys/api /keys/gateway /keys/realtime /keys/collector
+    volumes:
+      - keys-api:/keys/api
+      - keys-gateway:/keys/gateway
+      - keys-realtime:/keys/realtime
+      - keys-collector:/keys/collector
+    networks: [oa]
+
+  # --- the four services that hold a half ----------------------------------
+  #
+  # `depends_on` expresses the ordering where the platform supports it. Where it
+  # does not, nothing breaks: a service handed a path to a file that is not
+  # there yet refuses to start and the restart policy brings it back once keygen
+  # has finished. A few seconds of crash-loop, then green — as opposed to the
+  # alternative, which is a stack that comes up green with the analytics read
+  # surface silently unmounted.
+
+  api:
+    environment:
+      QUERY_SIGNING_PRIVATE_KEY_FILE: /keys/query.private.pem
+      REALTIME_TOKEN_SIGNING_KEY_FILE: /keys/realtime.private.pem
+      PREVIEW_TOKEN_SIGNING_KEY_FILE: /keys/preview.private.pem
+    volumes:
+      - keys-api:/keys:ro
+    depends_on:
+      keygen: { condition: service_completed_successfully }
+
+  gateway:
+    environment:
+      QUERY_SIGNING_PUBLIC_KEY_FILE: /keys/query.public.pem
+    volumes:
+      - keys-gateway:/keys:ro
+    depends_on:
+      keygen: { condition: service_completed_successfully }
+
+  realtime:
+    environment:
+      REALTIME_TOKEN_VERIFY_KEY_FILE: /keys/realtime.public.pem
+    volumes:
+      - keys-realtime:/keys:ro
+    depends_on:
+      keygen: { condition: service_completed_successfully }
+
+  collector:
+    environment:
+      PREVIEW_TOKEN_VERIFY_KEY_FILE: /keys/preview.public.pem
+    volumes:
+      - keys-collector:/keys:ro
+    depends_on:
+      keygen: { condition: service_completed_successfully }
+
+volumes:
+  keys-api:
+  keys-gateway:
+  keys-realtime:
+  keys-collector:

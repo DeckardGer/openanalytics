@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { policySchema } from './policy.ts'
 
@@ -876,6 +877,137 @@ export function describeEnvSurface(): readonly EnvVariableDescription[] {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/** The suffix that marks a variable as carrying a path instead of a value. */
+const FILE_SUFFIX = '_FILE'
+
+/**
+ * Every variable name any schema in this process knows about.
+ *
+ * Deliberately the *union across all services*, not the calling service's own
+ * schema. `QUERY_SIGNING_PRIVATE_KEY` belongs to the api's schema, so a
+ * per-service set would leave `QUERY_SIGNING_PRIVATE_KEY_FILE` unresolved on
+ * the gateway — and an unresolved name is a name the forbidden-key check never
+ * sees. The boundary is only enforceable if every service resolves every name.
+ *
+ * Forbidden keys are folded in for the same reason: a name a service must never
+ * hold has to be resolvable *there* in order to be refused there.
+ */
+function knownVariableNames(): ReadonlySet<string> {
+  const names = new Set<string>()
+  for (const service of SERVICE_ENV_NAMES) {
+    for (const name of Object.keys(serviceSchemas[service].shape)) names.add(name)
+    for (const name of forbiddenKeysFor(service)) names.add(name)
+  }
+  for (const name of Object.keys(policySchema.shape)) names.add(name)
+  for (const extension of envExtensions) {
+    for (const schema of Object.values(extension.schemas ?? {})) {
+      if (!schema) continue
+      for (const name of Object.keys(schema.shape)) names.add(name)
+    }
+  }
+  return names
+}
+
+/**
+ * Reads `X` from the file named by `X_FILE`, returning a copy of the source.
+ *
+ * The one-click self-host platforms (Coolify, Openship and the template
+ * catalogues shaped like them) can generate a random *string* into an
+ * environment variable and nothing else: no catalogue has a generator that
+ * produces a keypair whose halves must match across two services. A one-shot
+ * step in the stack can write the pairs to a volume, but only if the services
+ * can be pointed at files. That is the whole reason this exists.
+ *
+ * Three rules, all of them loud. A path is an assertion that the value matters,
+ * so an unreadable or empty file is a refusal to start — unlike an absent
+ * variable, which several services deliberately treat as "this feature is off"
+ * (the optional-until-used rule). Silently starting with the feature disabled is
+ * the failure mode this whole mechanism exists to avoid: a stack that comes up
+ * green while analytics reads are unmounted.
+ *
+ * A `*_FILE` variable whose base name no schema declares is left alone rather
+ * than rejected: `SSL_CERT_FILE` is a standard OpenSSL variable that may be set
+ * on any host, and refusing to boot over somebody else's convention would be a
+ * self-inflicted outage.
+ */
+function resolveFileBackedVariables(
+  source: Record<string, string | undefined>,
+  issues: { path: string; message: string }[],
+): Record<string, string | undefined> {
+  const resolved = { ...source }
+  const known = knownVariableNames()
+
+  for (const [key, path] of Object.entries(source)) {
+    if (!key.endsWith(FILE_SUFFIX)) continue
+    if (path === undefined || path === '') continue
+    const name = key.slice(0, -FILE_SUFFIX.length)
+    if (!known.has(name)) continue
+
+    if (source[name] !== undefined && source[name] !== '') {
+      issues.push({
+        path: key,
+        message: `cannot be combined with ${name}: set the value or the file path, not both`,
+      })
+      continue
+    }
+
+    let contents: string
+    try {
+      contents = readFileSync(path, 'utf8')
+    } catch (error) {
+      const code =
+        error instanceof Error && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : 'unknown error'
+      issues.push({ path: key, message: `cannot read "${path}" (${code})` })
+      continue
+    }
+
+    // Trailing newline is what every generator writes and no consumer wants:
+    // `openssl pkey -out` ends the PEM with one. Never the contents in an
+    // issue message — the path is diagnostic, the value is the secret.
+    const value = contents.trim()
+    if (value === '') {
+      issues.push({ path: key, message: `file "${path}" is empty` })
+      continue
+    }
+    resolved[name] = value
+  }
+
+  return resolved
+}
+
+/**
+ * `resolveFileBackedVariables` for callers outside `loadServiceEnv`.
+ *
+ * A registered surface parses its *own* variables where the code that uses them
+ * lives — `loadServiceEnv` validates them at boot but does not return them, so
+ * the surface reads `process.env` a second time later. That second read has to
+ * resolve paths too. Without it a deployment supplying one of a surface's
+ * variables as a path would pass boot validation and then find nothing there
+ * when the surface parsed for itself: green at startup, broken at the first
+ * request that needed the value. Found by testing the extension branch rather
+ * than assuming it behaved like the product's own.
+ *
+ * Throws rather than collecting, because by the time a surface parses, boot has
+ * already reported every readable problem; anything failing here is a file that
+ * changed underneath a running process.
+ */
+export function resolveEnvFileReferences(
+  source: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  const issues: { path: string; message: string }[] = []
+  const resolved = resolveFileBackedVariables(source, issues)
+  if (issues.length > 0) {
+    throw new Error(
+      `Invalid file-backed environment:\n${issues
+        .map((issue) => `  - ${issue.path}: ${issue.message}`)
+        .join('\n')}`,
+    )
+  }
+  return resolved
+}
+
 /**
  * Validates the environment for one service.
  *
@@ -888,8 +1020,17 @@ export function loadServiceEnv<S extends ServiceEnvName>(
 ): ServiceEnv<S> {
   const issues: { path: string; message: string }[] = []
 
+  // FIRST, before the boundary check below reads it. The check matches variable
+  // NAMES, so a value still sitting behind `X_FILE` is a value the boundary
+  // cannot see: point a gateway at the api's private key file and it would come
+  // up green, holding the key that mints the envelopes it exists to verify.
+  // Resolving here means a file-supplied secret is refused exactly where the
+  // same secret supplied inline is refused. Proven by breaking it first:
+  // with this call below the loop, the gateway started without complaint.
+  const resolved = resolveFileBackedVariables(source, issues)
+
   for (const key of forbiddenKeysFor(service)) {
-    if (source[key] !== undefined && source[key] !== '') {
+    if (resolved[key] !== undefined && resolved[key] !== '') {
       issues.push({
         path: key,
         message: `must not be provided to the "${service}" service (least-privilege secret boundary)`,
@@ -897,7 +1038,7 @@ export function loadServiceEnv<S extends ServiceEnvName>(
     }
   }
 
-  const parsed = serviceSchemas[service].safeParse(source)
+  const parsed = serviceSchemas[service].safeParse(resolved)
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
       issues.push({ path: issue.path.join('.') || '(root)', message: issue.message })
@@ -909,14 +1050,14 @@ export function loadServiceEnv<S extends ServiceEnvName>(
   for (const extension of envExtensions) {
     const schema = extension.schemas?.[service]
     if (!schema) continue
-    const result = schema.safeParse(source)
+    const result = schema.safeParse(resolved)
     if (result.success) continue
     for (const issue of result.error.issues) {
       issues.push({ path: issue.path.join('.') || '(root)', message: issue.message })
     }
   }
 
-  const policy = policySchema.safeParse(source)
+  const policy = policySchema.safeParse(resolved)
   if (!policy.success) {
     for (const issue of policy.error.issues) {
       issues.push({ path: issue.path.join('.') || '(root)', message: issue.message })
