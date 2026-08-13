@@ -7,6 +7,13 @@ own hardware under AGPL-3.0.
 A hosted instance runs at **[getopen.so](https://getopen.so)**, operated by the
 authors: the same code, someone else's servers.
 
+![The Overview screen: visitors, pageviews, bounce rate, average visit and
+revenue across a day, with top pages, referrers and revenue
+underneath](docs/images/dashboard.png)
+
+▶ **[Watch the dashboard in motion](https://www.youtube.com/watch?v=qS_yALtcreI)**,
+a tour of these same screens on YouTube.
+
 ## What is in this repository
 
 The product, as one pnpm monorepo:
@@ -30,6 +37,26 @@ What it does, in one list: page views, custom and attribute-driven events,
 sessions, web vitals, funnels, per-site retention, embeddable widgets, public
 share links, revenue analytics from _your_ Stripe account, CSV/JSON import and
 export, an MCP server, and a CLI.
+
+**Who is on the site now**, from a presence cache rather than a table scan.
+Names are generated per visitor and mean nothing outside the day they were
+minted.
+
+![The realtime screen: five visitors online with the page each is on, and
+everyone seen in the last 24 hours below them](docs/images/realtime.png)
+
+**Where one visitor went**, session by session. The identity behind a trail is
+a salted hash that rotates every night, so the trail is as long as a visit and
+never as long as a person.
+
+![One visitor's trail: two visits, one arrived direct and one from X, each
+listing the pages opened inside it](docs/images/visitor-journey.png)
+
+**Where they are**, at city level and only when a site opts in. The lookup runs
+against a database on your own disk and never leaves the host.
+
+![A globe with visitors placed on it, one each in eastern Europe, north Africa,
+the Middle East and South America](docs/images/live-globe.png)
 
 Architecture rules CI enforces, not conventions:
 
