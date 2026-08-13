@@ -46,40 +46,51 @@ import { z } from 'zod'
  *     same anonymous visitor carry different hints but the same anonymous id and
  *     the same 30-minute continuity, so they stay one session. Partitioning by
  *     hint would have split them; partitioning by identity does not.
- *   - **A shared hint does not merge two distinct visitors.** Two different
- *     people who happen to reuse a hint value on the same UTC day have different
- *     anonymous ids (different IP/UA class), land in different partitions, and
- *     are never merged — the hint is not trusted to override network identity
- *     (§10: the hint "cannot exceed the 30-minute rule", and by the same logic
- *     cannot exceed identity).
+ *   - **A shared hint does not merge two unrelated visitors.** The hint is per
+ *     tab (`sessionStorage`) and randomly minted, so two people cannot arrive
+ *     carrying the same one. What a shared hint under two anonymous ids means is
+ *     the opposite: one visitor whose *network* identity moved under them. Two
+ *     genuinely different people — two devices behind one NAT, say — carry
+ *     different hints and are never merged.
  *
- * ### Midnight rotation (D-102)
+ * ### Identity rotation (D-102)
  *
  * The anonymous id is `HMAC(ip/ua-class, site, UTC-date, key-version)`, so it
- * **rotates at UTC midnight**. An un-identified visitor whose session straddles
- * midnight therefore arrives under two anonymous ids — two partitions — with the
- * same client session hint. The hint exists precisely for this continuity, so
- * after the per-identity split a **midnight bridge** re-joins two adjacent
+ * **rotates at UTC midnight and whenever the IP moves** — a VPN hop, a mobile
+ * carrier's CGNAT, an IPv6 temporary address. Either way an un-identified
+ * visitor arrives under two anonymous ids — two partitions — carrying the same
+ * client session hint. The hint exists precisely for this continuity, so after
+ * the per-identity split an **identity bridge** re-joins two adjacent
  * non-identified sessions when, and only when, they
  *
- *   1. are both anonymous (an identified visitor keeps one `user_id` across
- *      midnight and never needs bridging),
+ *   1. are both anonymous (an identified visitor keeps one `user_id` across a
+ *      rotation and never needs bridging),
  *   2. share a non-empty client session hint,
- *   3. sit on adjacent UTC calendar dates (the rotation boundary — a same-day
- *      pair with different anonymous ids is two visitors, never bridged), and
- *   4. are within the 30-minute inactivity window across that midnight.
+ *   3. are within the 30-minute inactivity window, and
+ *   4. do not carry the merged span to or past the session cap (ADR-0018).
  *
- * The bridge is applied iteratively, so a marathon session crossing two
- * midnights (three anonymous ids) chains correctly.
+ * When the rotation is a midnight one the dates must also be *adjacent*, which
+ * the inactivity window already implies and which is kept explicit so the
+ * cross-day bound is stated in the code that enforces it. The bridge is applied
+ * iteratively, so a visit crossing several rotations chains correctly.
  *
- * **Privacy consequence, stated openly.** The bridge is the single place where
- * the default cookieless identity is intentionally linked across its daily
- * rotation. It is bounded to one 30-minute window straddling one UTC midnight
- * and requires a matching hint, so it cannot reconstruct long-term cross-day
- * tracking (D-102 keeps that out of core). A bridged session is flagged
- * (`midnightBridged`) so the linkage is visible in the facts rather than
- * implicit. A future persistent-identity mode would need its own privacy ADR;
- * this bridge does not open that door.
+ * **Why same-day merging was not always allowed.** It was refused on the
+ * assumption that a same-day pair with different anonymous ids is two visitors.
+ * Production disproved it: on the dogfood site 24 of 26 split identities over
+ * seven days were same-day, one of them reappearing 3 seconds later from the
+ * same city — one person, counted twice. The refusal was costing accuracy and
+ * buying no privacy.
+ *
+ * **Privacy consequence, stated openly.** Merging two ids *inside* one UTC day
+ * links nothing the daily rotation was protecting: both ids belong to the same
+ * day, and the published commitment is about not linking *across* days. The
+ * cross-day case is unchanged — still one 30-minute window straddling one UTC
+ * midnight, still requiring a matching hint, so it cannot reconstruct long-term
+ * cross-day tracking (D-102 keeps that out of core). A session bridged *across a
+ * date* is flagged (`midnightBridged`) so that linkage stays visible in the
+ * facts; a same-day merge is not flagged, because there is no cross-rotation
+ * linkage to disclose. A future persistent-identity mode would need its own
+ * privacy ADR; this bridge does not open that door.
  *
  * ### Identity stitch (mid-visit `identify`)
  *
@@ -676,17 +687,24 @@ export function sessionize(
         // anonymous stream (a kiosk with a sticky hint) from chaining day after
         // day into a session that never closes and stalls the watermark.
         if (next.endMs - head.startMs >= capMs) continue
-        // Different network identity, joined only across a single midnight and
-        // only when a shared hint vouches for the continuity.
+        // Different network identity, joined only when a shared hint vouches for
+        // the continuity — and, when the rotation is a midnight one, only across
+        // a single calendar boundary.
         const differentAnon = ![...next.anonymousIds].every((id) => head.anonymousIds.has(id))
         if (!differentAnon) continue
-        if (!isAdjacentUtcDate(utcDateOf(head.endMs), utcDateOf(next.startMs))) continue
+        const headDate = utcDateOf(head.endMs)
+        const nextDate = utcDateOf(next.startMs)
+        const crossesMidnight = headDate !== nextDate
+        if (crossesMidnight && !isAdjacentUtcDate(headDate, nextDate)) continue
         if (!sharesHint(head, next)) continue
         // Merge next into head and keep folding.
         for (const event of next.events) pushEvent(head, event)
         head.events.sort(compareEvents)
         head.endMs = head.events[head.events.length - 1]!.occurredMs
-        head.midnightBridged = true
+        // Only a rotation that actually crossed a UTC date is a *midnight*
+        // bridge. A same-day merge stays unflagged: the flag's job is to make
+        // linkage across the daily rotation visible, and there is none here.
+        if (crossesMidnight) head.midnightBridged = true
         bridged.add(next)
       }
     }

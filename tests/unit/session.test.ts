@@ -146,9 +146,15 @@ describe('sessionize — session boundaries', () => {
     expect(sessions[0]!.pageviews).toBe(2)
   })
 
-  it('does not merge two distinct same-day visitors that share a hint', () => {
-    // Different anonymous ids (different IP/UA) on the same UTC day, same hint.
-    // The hint must not override network identity → two sessions.
+  it('merges a same-day identity rotation that shares a hint, without flagging a midnight bridge', () => {
+    // Different anonymous ids on the same UTC day, same hint: one visitor whose
+    // IP moved mid-visit (VPN, mobile CGNAT, an IPv6 temporary address), not two
+    // people. The hint lives in per-tab `sessionStorage`, so two people cannot
+    // produce the same one — measured in production: a shared hint reappearing
+    // under a second id 3 seconds later from the same city.
+    //
+    // `midnightBridged` stays false: the flag exists to make linkage *across the
+    // daily rotation* visible, and this merge does not cross a UTC date.
     const sessions = sessionize(SITE, [
       pageView({ eventId: 'e1', anonymousId: 'anonA', sessionHint: 'shared' }),
       pageView({
@@ -158,8 +164,40 @@ describe('sessionize — session boundaries', () => {
         occurredAt: at('2026-07-23T10:01:00.000Z'),
       }),
     ])
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]!.pageviews).toBe(2)
+    expect(sessions[0]!.midnightBridged).toBe(false)
+  })
+
+  it('does not merge two same-day identities that do not share a hint', () => {
+    // The guard that carries the whole rule: without a shared hint there is no
+    // evidence of continuity, so a different network identity is a different
+    // visitor. Two people behind one NAT land here.
+    const sessions = sessionize(SITE, [
+      pageView({ eventId: 'e1', anonymousId: 'anonA', sessionHint: 'hintX' }),
+      pageView({
+        eventId: 'e2',
+        anonymousId: 'anonB',
+        sessionHint: 'hintY',
+        occurredAt: at('2026-07-23T10:01:00.000Z'),
+      }),
+    ])
     expect(sessions).toHaveLength(2)
-    expect(sessions.every((s) => !s.midnightBridged)).toBe(true)
+  })
+
+  it('does not merge a same-day identity rotation beyond the inactivity window', () => {
+    // The inactivity window bounds the same-day merge exactly as it bounds the
+    // midnight bridge — a sticky hint cannot chain a day into one session.
+    const sessions = sessionize(SITE, [
+      pageView({ eventId: 'e1', anonymousId: 'anonA', sessionHint: 'shared' }),
+      pageView({
+        eventId: 'e2',
+        anonymousId: 'anonB',
+        sessionHint: 'shared',
+        occurredAt: at('2026-07-23T10:31:00.000Z'),
+      }),
+    ])
+    expect(sessions).toHaveLength(2)
   })
 })
 

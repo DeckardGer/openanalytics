@@ -644,13 +644,133 @@ describeIfClickHouse('session-read and funnel gateway operations', () => {
       visitor: 'v1',
       limit: 500,
     })
-    // Page views only, newest first, and never another visitor's rows.
+    // Page views only, newest first, and never an unrelated visitor's rows —
+    // v2 shares no session with v1, so the rotation branch cannot reach it.
     expect(trail.map((row) => row['page_path'])).toEqual(['/checkout', '/pricing', '/'])
     expect(trail.map((row) => row['session_id'])).toEqual(['s2', 's1', 's1'])
 
     // A visitor with nothing in the window is an empty trail, not an error.
     expect(
       await run('analytics.visitor_trail', { site_id: site, from, to, visitor: 'nobody' }),
+    ).toEqual([])
+  })
+
+  it('reads the trail of a visitor whose id rotated mid-visit, but never across a UTC date', async () => {
+    // D-102: the anonymous id is derived from the IP, so one visitor arrives
+    // under two ids when their network moves. Measured in production: the second
+    // id carried the web vitals and the *first* carried the only page view, so
+    // the board showed a live visitor with an empty trail. The shared client
+    // session hint is what proves the two are one person, and it is the same
+    // evidence `packages/domain/src/session.ts`'s identity bridge acts on.
+    const site = randomUUID()
+    const from = '2026-07-12T00:00:00.000Z'
+    const to = '2026-07-12T23:00:00.000Z'
+    const at = (iso: string): string => iso.replace('T', ' ').replace('Z', '')
+
+    await insertRawEvents([
+      // One visit, one hint, two ids: the page view lands under `ip1`.
+      {
+        site_id: site,
+        event_id: '00000000-0000-4000-8000-0000000000c1',
+        type: 'page_view',
+        occurred_at: at('2026-07-12T10:00:00.000'),
+        anonymous_id: 'ip1',
+        session_id: 'moved',
+        page_path: '/pricing',
+      },
+      // Seconds later the IP moves: a new id, and only a web vital under it.
+      {
+        site_id: site,
+        event_id: '00000000-0000-4000-8000-0000000000c2',
+        type: 'web_vital',
+        occurred_at: at('2026-07-12T10:00:03.000'),
+        anonymous_id: 'ip2',
+        session_id: 'moved',
+      },
+      // A different person on the same day carrying their own hint: the branch
+      // keys on the hint, so this must stay out of both trails.
+      {
+        site_id: site,
+        event_id: '00000000-0000-4000-8000-0000000000c3',
+        type: 'page_view',
+        occurred_at: at('2026-07-12T10:00:05.000'),
+        anonymous_id: 'other',
+        session_id: 'their-own',
+        page_path: '/secret',
+      },
+      // A hintless row — a server-side event — must not pool into anybody.
+      {
+        site_id: site,
+        event_id: '00000000-0000-4000-8000-0000000000c4',
+        type: 'page_view',
+        occurred_at: at('2026-07-12T10:00:07.000'),
+        anonymous_id: 'hintless',
+        session_id: '',
+        page_path: '/hintless',
+      },
+    ])
+
+    // Asked about the id that has no page view of its own, the trail answers
+    // with the one its own visit produced. This is the assertion the old
+    // anonymous-id-only match failed: it returned nothing at all.
+    const rotated = await run('analytics.visitor_trail', {
+      site_id: site,
+      from,
+      to,
+      visitor: 'ip2',
+      limit: 500,
+    })
+    expect(rotated.map((row) => row['page_path'])).toEqual(['/pricing'])
+
+    // Neither the stranger's page nor the hintless row is reachable from it.
+    expect(rotated.map((row) => row['page_path'])).not.toContain('/secret')
+    expect(rotated.map((row) => row['page_path'])).not.toContain('/hintless')
+
+    // A hintless visitor still reads their own rows: the rotation branch is
+    // additive, never a replacement for the identity match.
+    expect(
+      (await run('analytics.visitor_trail', { site_id: site, from, to, visitor: 'hintless' })).map(
+        (row) => row['page_path'],
+      ),
+    ).toEqual(['/hintless'])
+  })
+
+  it('does not carry a trail across the UTC-midnight identity rotation', async () => {
+    // The daily rotation is the published privacy boundary, so the read stops at
+    // it even though the hint would happily join the two days. This is the case
+    // the realtime board films as "online, no pageviews", and it is answered by
+    // showing where the visitor is now — not by linking yesterday to today.
+    const site = randomUUID()
+    const at = (iso: string): string => iso.replace('T', ' ').replace('Z', '')
+
+    await insertRawEvents([
+      {
+        site_id: site,
+        event_id: '00000000-0000-4000-8000-0000000000d1',
+        type: 'page_view',
+        occurred_at: at('2026-07-12T20:51:48.000'),
+        anonymous_id: 'day1',
+        session_id: 'overnight',
+        page_path: '/',
+      },
+      {
+        site_id: site,
+        event_id: '00000000-0000-4000-8000-0000000000d2',
+        type: 'web_vital',
+        occurred_at: at('2026-07-13T04:04:10.000'),
+        anonymous_id: 'day2',
+        session_id: 'overnight',
+      },
+    ])
+
+    expect(
+      await run('analytics.visitor_trail', {
+        site_id: site,
+        from: '2026-07-12T12:00:00.000Z',
+        to: '2026-07-13T12:00:00.000Z',
+        visitor: 'day2',
+        limit: 500,
+      }),
     ).toEqual([])
   })
 })

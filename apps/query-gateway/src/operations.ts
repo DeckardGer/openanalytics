@@ -1670,6 +1670,12 @@ const recentVisitorsOperation = defineOperation({
  * Sessions are not grouped here. The session hint is returned per row and the
  * API groups on it, the same key `analytics.funnel_session` aggregates by, so
  * both surfaces mean the same thing by "a session".
+ *
+ * The match is by anonymous id **or** by a session the visitor shares with
+ * another id on the same UTC date — see the WHERE clause. Without that second
+ * branch a visitor whose IP moved mid-visit reads as somebody with no pageviews
+ * at all, which is what the realtime board was reporting: live presence, an
+ * empty trail, and no way to tell the two apart from a genuine ingest gap.
  */
 const visitorTrailOperation = defineOperation({
   id: 'analytics.visitor_trail',
@@ -1708,10 +1714,43 @@ const visitorTrailOperation = defineOperation({
     '  er.referrer_domain AS referrer_domain',
     'FROM events_raw AS er',
     'WHERE er.site_id = {site_id:UUID}',
-    `  AND ${VISITOR_IDENTITY} = {visitor:String}`,
     "  AND er.occurred_at >= toDateTime64({from:String}, 3, 'UTC')",
     "  AND er.occurred_at <  toDateTime64({to:String}, 3, 'UTC')",
     "  AND er.type = 'page_view'",
+    '  AND (',
+    // The rotation branch (D-102, `packages/domain/src/session.ts`): the identity
+    // is `HMAC(ip/ua-class, site, UTC-date, …)`, so one visitor's own pageview
+    // can be filed under a *different* id than the one being asked about — an IP
+    // that moved mid-visit. The shared client-session hint is the evidence that
+    // it is the same person, the same evidence the sessionizer's identity bridge
+    // acts on, so the trail has to read it the same way or the two surfaces
+    // disagree about who one visitor is.
+    //
+    // Bounded exactly as the bridge is: a non-empty hint (an empty one would
+    // pool every hintless server-side row into one pseudo-visitor) and the same
+    // UTC date, so this never links across the daily rotation. An anonymous id
+    // never spans two dates by construction, so the date set below holds exactly
+    // one day — it is written as a set because the SQL cannot assume that.
+    `    ${VISITOR_IDENTITY} = {visitor:String}`,
+    '    OR (',
+    "      er.session_id != ''",
+    '      AND er.session_id IN (',
+    '        SELECT session_id FROM events_raw',
+    '        WHERE site_id = {site_id:UUID}',
+    '          AND anonymous_id = {visitor:String}',
+    "          AND occurred_at >= toDateTime64({from:String}, 3, 'UTC')",
+    "          AND occurred_at <  toDateTime64({to:String}, 3, 'UTC')",
+    "          AND session_id != ''",
+    '      )',
+    '      AND toDate(er.occurred_at) IN (',
+    '        SELECT DISTINCT toDate(occurred_at) FROM events_raw',
+    '        WHERE site_id = {site_id:UUID}',
+    '          AND anonymous_id = {visitor:String}',
+    "          AND occurred_at >= toDateTime64({from:String}, 3, 'UTC')",
+    "          AND occurred_at <  toDateTime64({to:String}, 3, 'UTC')",
+    '      )',
+    '    )',
+    '  )',
     'ORDER BY occurred_at DESC, event_id DESC',
     'LIMIT {limit:UInt32}',
   ].join('\n'),
