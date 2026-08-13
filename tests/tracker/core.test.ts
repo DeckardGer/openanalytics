@@ -129,8 +129,11 @@ describe('pageviews', () => {
 
 describe('public API', () => {
   it('sends track, identify and conversion in the documented shapes', () => {
-    // Docs snapshot 02 §11.
-    const harness = createHarness()
+    // Docs snapshot 02 §11. The site's attributed-revenue flag is on because the
+    // conversion below carries an `order_id`, which the tracker only sends for a
+    // site that opted in (ADR-0064 D4a); what this test is about is the shape of
+    // the three calls, and `tests/tracker/privacy.test.ts` owns the switch.
+    const harness = createHarness({ config: { attributedRevenue: true } })
 
     harness.tracker.track('signup_started', { plan: 'growth' })
     harness.tracker.identify('customer-internal-id')

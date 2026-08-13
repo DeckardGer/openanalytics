@@ -26,11 +26,19 @@ const ENTRY = join(ROOT, 'apps', 'tracker', 'src', 'browser.ts')
 const OUT_DIR = join(ROOT, 'apps', 'tracker', 'bundle')
 const OUT_FILE = join(OUT_DIR, 'oa.js')
 
-/** Gzipped bytes. The number a visitor's connection actually transfers. */
-export const GZIP_BUDGET_BYTES = 9_216
+/**
+ * Gzipped bytes. The number a visitor's connection actually transfers.
+ *
+ * Raised from 9,216 by ADR-0064, which measured 9,404 after three changes: the
+ * linking gate (+186 B), strict storage mode (+55 B) and the site's
+ * attributed-revenue flag (+37 B). The new number is not the measurement — it is
+ * the measurement plus room to work in, which is what a budget has to be if the
+ * next change is to be a decision rather than an emergency.
+ */
+export const GZIP_BUDGET_BYTES = 9_728
 
 /** Uncompressed bytes. Bounds parse and compile cost, which gzip hides. */
-export const RAW_BUDGET_BYTES = 24_576
+export const RAW_BUDGET_BYTES = 25_600
 
 const result = await build({
   entryPoints: [ENTRY],

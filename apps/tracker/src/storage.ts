@@ -16,7 +16,16 @@ export interface SafeStorage {
   remove(key: string): void
 }
 
-const memoryStorage = (): SafeStorage => {
+/**
+ * A `SafeStorage` that lives and dies with the page.
+ *
+ * Two callers. `safeStorage` falls back to it when the real store throws or is
+ * absent — Safari private mode, a blocked third-party context, an exceeded
+ * quota. And strict mode (ADR-0064) *chooses* it: `data-storage="none"` makes
+ * the tracker write nothing to the device at all, at the cost of the session
+ * hint, the offline retry queue and the config cache lasting one page load.
+ */
+export const memoryStorage = (): SafeStorage => {
   const map = new Map<string, string>()
   return {
     get: (key) => map.get(key) ?? null,

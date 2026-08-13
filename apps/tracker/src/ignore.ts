@@ -14,7 +14,9 @@ import type { SafeStorage } from './storage.ts'
  * set it, exactly like the class-standard `plausible_ignore`. A browser whose
  * localStorage is unavailable (Safari private mode) cannot persist the flag
  * and keeps being counted — the honest failure for a mechanism whose whole
- * store is localStorage.
+ * store is localStorage. A site in strict mode (`data-storage="none"`,
+ * ADR-0064) has no exclusion flag at all for the same reason, and `browser.ts`
+ * does not call this module there.
  */
 
 export const IGNORE_KEY = 'oa_ignore'

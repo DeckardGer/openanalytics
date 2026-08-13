@@ -36,6 +36,10 @@ describe('privacy gate', () => {
     // without qualification, and says silence is not treated as objection.
     // Changing any of these three values is a change to a published legal
     // document, not a tuning decision — this test is what makes that visible.
+    //
+    // Three, not four: ADR-0064 considered a fourth flag gating the linking
+    // signals and declined it. A field appearing here later is that decision
+    // being revisited, which is exactly the size of change this pin is for.
     expect(DEFAULT_PRIVACY_POLICY).toEqual({
       respectGpc: true,
       respectDnt: true,
@@ -119,6 +123,61 @@ describe('privacy gate', () => {
 
     expect(nextPage.signals().consent).toBe('denied')
     expect(nextPage.mayCollect()).toBe(false)
+  })
+
+  it('sends identify without waiting for consent (ADR-0064)', () => {
+    // The decision ADR-0064 records rather than the one it first proposed: a
+    // mandatory linking gate was considered and declined, because `identify()`
+    // is a call the site's own code makes as controller. Silence is not
+    // objection here either — an expressed `denied` still stops everything,
+    // which the test above pins.
+    const harness = createHarness()
+
+    harness.tracker.identify('u_1')
+    harness.runTimers()
+
+    const identified = harness.eventsOfType('identify')
+    expect(identified).toHaveLength(1)
+    expect(identified[0]?.['external_user_id']).toBe('u_1')
+    harness.stop()
+  })
+
+  it('sends no order_id until the site turns attributed revenue on (D4a)', () => {
+    // The one linking rule the tracker does enforce, and it is the site's own
+    // switch rather than the visitor's consent. The conversion itself is
+    // measurement and is always sent; what the flag decides is whether it
+    // carries the property the revenue matcher joins on.
+    const harness = createHarness()
+    harness.tracker.consent('granted')
+
+    harness.tracker.conversion('purchase', { order_id: 'cs_test_a1B2c3', plan: 'growth' })
+    harness.runTimers()
+
+    // Consent alone does not open it: the choice is the site's.
+    expect(harness.eventsOfType('conversion')[0]?.['properties']).toEqual({ plan: 'growth' })
+    harness.stop()
+
+    const optedIn = createHarness({ config: { attributedRevenue: true } })
+    optedIn.tracker.conversion('purchase', { order_id: 'cs_test_a1B2c3', plan: 'growth' })
+    optedIn.runTimers()
+
+    expect(optedIn.eventsOfType('conversion')[0]?.['properties']).toEqual({
+      order_id: 'cs_test_a1B2c3',
+      plan: 'growth',
+    })
+    optedIn.stop()
+  })
+
+  it('sends no property bag at all when the hint was the only property', () => {
+    const harness = createHarness()
+
+    harness.tracker.conversion('purchase', { order_id: 'cs_test_a1B2c3' })
+    harness.runTimers()
+
+    const [conversion] = harness.eventsOfType('conversion')
+    expect(conversion).toBeDefined()
+    expect(conversion && 'properties' in conversion).toBe(false)
+    harness.stop()
   })
 
   it('reads both GPC and DNT from the host, not from a cached snapshot', () => {

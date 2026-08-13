@@ -2,7 +2,12 @@ import { HEARTBEAT_INTERVAL_SECONDS, LIMITS, TRACKER_SDK, TRACKER_VERSION } from
 import { createEngagement } from './engagement.ts'
 import { createHeartbeat } from './heartbeat.ts'
 import { createInteractions } from './interaction.ts'
-import { DEFAULT_PRIVACY_POLICY, createPrivacyGate, type PrivacyPolicy } from './privacy.ts'
+import {
+  DEFAULT_PRIVACY_POLICY,
+  createPrivacyGate,
+  stripLinkingHints,
+  type PrivacyPolicy,
+} from './privacy.ts'
 import { createRules, type NoCodeRule } from './rules.ts'
 import {
   isValidEventName,
@@ -11,7 +16,7 @@ import {
   sanitizeUrl,
   truncate,
 } from './sanitize.ts'
-import { createRetryQueue, createSessionTracker, safeStorage } from './storage.ts'
+import { createRetryQueue, createSessionTracker, memoryStorage, safeStorage } from './storage.ts'
 import { createTransport } from './transport.ts'
 import type {
   EngagementPayload,
@@ -33,7 +38,8 @@ import { createWebVitals, type ObserverHost } from './vitals.ts'
  *
  * - the `event_id` is minted here, before the event reaches the transport, so a
  *   retry carries the same id (docs snapshot 02 §7.1);
- * - every signal passes the privacy gate before it becomes an event;
+ * - every signal passes the privacy gate before it becomes an event, and a
+ *   linking hint additionally passes the site's own switch (ADR-0064);
  * - an SPA route change ends the previous route's engagement, resets the
  *   interaction ceiling and starts a new pageview — but not a new session
  *   (§10);
@@ -47,6 +53,16 @@ export interface TrackerRuntimeConfig {
   readonly heartbeatIntervalSeconds: number
   /** Published (or previewed) no-code rules the runtime evaluates (ADR-0034). */
   readonly noCodeRules: readonly NoCodeRule[]
+  /**
+   * Whether this site opted into attributed revenue (ADR-0064, D4a).
+   *
+   * The second half of the linking gate, and the half that is the site's choice
+   * rather than the visitor's: off, the `order_id` hint is not sent at all, from
+   * anybody, consent or no consent. The rule it enforces is that the choice
+   * lives at the signal — a site that has not turned attribution on should not
+   * have a browser sending the hint that would make it work.
+   */
+  readonly attributedRevenue: boolean
   readonly features: {
     readonly web_vitals: boolean
     readonly engagement: boolean
@@ -70,6 +86,10 @@ export const DEFAULT_RUNTIME_CONFIG: TrackerRuntimeConfig = {
   heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
   noCodeRules: [],
   features: { web_vitals: true, engagement: true, interactions: true, heartbeat: true },
+  // Off until the site's configuration says otherwise, which matters most on the
+  // first page load — configuration arrives after the first pageview, so the
+  // conservative value is the one a visitor is served before anything is known.
+  attributedRevenue: false,
 }
 
 export interface TrackerOptions {
@@ -79,6 +99,19 @@ export interface TrackerOptions {
   readonly window?: Window & typeof globalThis
   readonly testMode?: boolean
   readonly debug?: boolean
+  /**
+   * `'none'` runs the tracker memory-only (ADR-0064, D5): nothing is written to
+   * `localStorage` or `sessionStorage`, so a visitor's device carries no byte of
+   * ours between page loads.
+   *
+   * What it costs, stated where the option is declared rather than in a release
+   * note: the client session hint resets on every page load, so a multi-page
+   * visit is stitched by the server's sessionizer alone; the offline retry queue
+   * cannot survive a page it was queued on; and `oa.consent()` holds for the
+   * current page only, so a site in this mode must re-assert consent on each
+   * one. `'auto'` is the default and is the ordinary behaviour.
+   */
+  readonly storage?: 'auto' | 'none'
   readonly privacyPolicy?: Partial<PrivacyPolicy>
   readonly config?: TrackerConfigPatch
   readonly now?: () => number
@@ -106,9 +139,21 @@ export interface TrackerOptions {
 export interface Tracker {
   /** `oa.track("signup_started", { plan: "growth" })` */
   track(name: string, properties?: Record<string, unknown>, options?: { actionId?: string }): void
-  /** `oa.identify("customer-internal-id")` — hashed site-scoped by the server. */
+  /**
+   * `oa.identify("customer-internal-id")` — hashed site-scoped by the server.
+   *
+   * Sends whenever collection is allowed at all. It carries a consent obligation
+   * for the site that calls it, which the documentation states and the tracker
+   * does not enforce (ADR-0064).
+   */
   identify(externalUserId: string): void
-  /** `oa.conversion("purchase", { order_id, value, currency })` */
+  /**
+   * `oa.conversion("purchase", { order_id, value, currency })`
+   *
+   * The event is measurement and is always sent; its `order_id` — the property
+   * the revenue matcher joins on — is a linking hint and is dropped unless the
+   * site turned attributed revenue on (ADR-0064 D4a).
+   */
   conversion(name: string, properties?: Record<string, unknown>): void
   /** Manual pageview, for frameworks that route in ways history patching misses. */
   pageview(): void
@@ -131,8 +176,14 @@ export function createTracker(options: TrackerOptions): Tracker {
     features: { ...DEFAULT_RUNTIME_CONFIG.features, ...options.config?.features },
   }
 
-  const localStore = safeStorage(win.localStorage ?? null)
-  const sessionStore = safeStorage(win.sessionStorage ?? null)
+  // Strict mode (ADR-0064, D5): `data-storage="none"` and the tracker writes
+  // nothing to the device — not the session hint, not the retry queue, not the
+  // consent state. It is one branch here rather than a flag threaded through
+  // three modules, because "nothing is written" is only credible if there is a
+  // single place a write could come from.
+  const strict = options.storage === 'none'
+  const localStore = strict ? memoryStorage() : safeStorage(win.localStorage ?? null)
+  const sessionStore = strict ? memoryStorage() : safeStorage(win.sessionStorage ?? null)
   const queue = createRetryQueue(localStore)
   const session = createSessionTracker(sessionStore, uuidV7)
   const privacy = createPrivacyGate(win, localStore, {
@@ -180,7 +231,22 @@ export function createTracker(options: TrackerOptions): Tracker {
   ): void => {
     if (!privacy.mayCollect()) return
 
-    const page = extras.page ?? currentPage()
+    // The site's attributed-revenue switch (ADR-0064 D4a), applied here rather
+    // than at each caller for the same reason `mayCollect` is: one place to
+    // change, and no path that quietly bypasses it. There are exactly two
+    // client-origin linking hints, audited against ADR-0033 D6 — the
+    // `external_user_id` an `identify` carries, and the `order_id` property the
+    // matcher joins a conversion on (D6 signal 1); signals 2 and 3 originate in
+    // the site's own Stripe integration and never in this bundle.
+    //
+    // Only the second is switchable here, and by the **site** rather than by the
+    // visitor. The consent obligation that comes with linking is real and it is
+    // the site's to meet as controller; a gate on a consent state we cannot
+    // verify would refuse a customer's own instruction on their behalf, which is
+    // why `identify()` is not gated at all (ADR-0064, Alternatives).
+    const withoutHints = stripLinkingHints(extras, config.attributedRevenue)
+
+    const page = withoutHints.page ?? currentPage()
     const event: TrackerEvent = {
       // Minted before the first attempt: a retry after a lost response must
       // carry the same id or the collector cannot deduplicate it (§7.1).
@@ -189,7 +255,7 @@ export function createTracker(options: TrackerOptions): Tracker {
       occurred_at: new Date(now()).toISOString(),
       client_session_id: session.current(now()),
       ...(page ? { page } : {}),
-      ...extras,
+      ...withoutHints,
     }
 
     transport.enqueue(event, options_)

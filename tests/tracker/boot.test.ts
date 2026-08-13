@@ -267,6 +267,95 @@ describe('tracker boot path', () => {
     clock.mockRestore()
   })
 
+  it('writes nothing to the device in strict mode, and still sends (ADR-0064 D5)', async () => {
+    // The claim `data-storage="none"` makes is absolute, so the assertion is
+    // absolute too: not "no oa.* key", but no call at all, on either store, in
+    // either direction. Reads are asserted because ePrivacy Article 5(3) names
+    // storage *and access*, and `safeStorage`'s own `__oa__` write probe is in
+    // scope for the same reason — which is why the spies are installed before
+    // the bundle is ever imported.
+    const local = vi.spyOn(window.localStorage, 'setItem')
+    const localRead = vi.spyOn(window.localStorage, 'getItem')
+    const session = vi.spyOn(window.sessionStorage, 'setItem')
+    const sessionRead = vi.spyOn(window.sessionStorage, 'getItem')
+
+    await boot({ 'data-storage': 'none' })
+    installed().track('checkout_started')
+    window.dispatchEvent(new Event('pagehide'))
+    await settle()
+
+    expect(local).not.toHaveBeenCalled()
+    expect(session).not.toHaveBeenCalled()
+    expect(localRead).not.toHaveBeenCalled()
+    expect(sessionRead).not.toHaveBeenCalled()
+
+    // Strict is about storage, not about silence: the visit is still measured.
+    expect(batches().flatMap(eventTypes)).toEqual(
+      expect.arrayContaining(['page_view', 'custom_event']),
+    )
+
+    local.mockRestore()
+    session.mockRestore()
+    localRead.mockRestore()
+    sessionRead.mockRestore()
+  })
+
+  it('writes to the device in the ordinary mode, which is what makes the strict test mean something', async () => {
+    // A negative assertion is only worth what its positive twin proves: without
+    // this, "no writes" would also pass on a tracker that had stopped booting.
+    const local = vi.spyOn(window.localStorage, 'setItem')
+    const session = vi.spyOn(window.sessionStorage, 'setItem')
+
+    await boot()
+    await settle()
+
+    expect(local).toHaveBeenCalled()
+    expect(session).toHaveBeenCalled()
+
+    local.mockRestore()
+    session.mockRestore()
+  })
+
+  it('still honours #oa-ignore before the snippet is validated', async () => {
+    // The exclusion check moved *after* the attribute read (strict mode decides
+    // whether it may touch storage at all) and must still sit before the key
+    // check — ADR-0057 F6's point is that an operator can exclude their browser
+    // on a page whose tag is broken.
+    resetBrowser('/pricing#oa-ignore')
+    const script = document.createElement('script')
+    script.setAttribute('data-collector', COLLECTOR_URL)
+    document.head.appendChild(script)
+
+    vi.resetModules()
+    await import('../../apps/tracker/src/browser.ts')
+
+    expect(window.localStorage.getItem('oa_ignore')).toBe('1')
+    expect((globalThis as unknown as Record<string, unknown>)['oa']).toBeUndefined()
+    expect(sent).toHaveLength(0)
+    ;(globalThis as unknown as Record<string, unknown>)['oa'] = { stop: () => undefined }
+  })
+
+  it('has no exclusion flag in strict mode, and says so by measuring anyway', async () => {
+    // The documented consequence of D5 rather than an oversight: the flag is
+    // localStorage, so honouring it would be the access strict mode promises not
+    // to make. A browser carrying the flag from an ordinary page is measured
+    // once the site turns strict mode on.
+    window.localStorage.setItem('oa_ignore', '1')
+    await boot({ 'data-storage': 'none' })
+
+    expect(batches().flatMap(eventTypes)).toContain('page_view')
+  })
+
+  it('keeps consent in memory only in strict mode', async () => {
+    const local = vi.spyOn(window.localStorage, 'setItem')
+    await boot({ 'data-storage': 'none' })
+    ;(installed() as unknown as { consent(state: string): void }).consent('granted')
+
+    expect(local).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem('oa.consent')).toBeNull()
+    local.mockRestore()
+  })
+
   it('starts nothing when the snippet carries no key', async () => {
     // Unchanged behaviour, pinned because the transport wiring sits right next
     // to this guard: a snippet without a key must not install a tracker at all.

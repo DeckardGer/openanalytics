@@ -1,7 +1,7 @@
 import { loadTrackerConfig } from './config.ts'
 import { resolveIgnore, showIgnoreNotice } from './ignore.ts'
 import { installTracker, optionsFromScript } from './install.ts'
-import { safeStorage } from './storage.ts'
+import { memoryStorage, safeStorage } from './storage.ts'
 
 /**
  * Bundle entry point.
@@ -41,20 +41,35 @@ function boot(): void {
   const doc = win.document
   if (!doc) return
 
-  // ADR-0057 F6: an excluded browser installs nothing and sends nothing.
-  // Checked before anything else — before the snippet is even validated — so
-  // `#oa-ignore` works on a page whose tag is otherwise broken.
-  const localStore = safeStorage(win.localStorage ?? null)
-  const ignore = resolveIgnore(localStore, win.location?.hash ?? '')
-  if (ignore.changed) showIgnoreNotice(doc, ignore.changed)
-  if (ignore.ignored) return
-
   const script =
     doc.currentScript ??
     doc.querySelector('script[data-key]') ??
     doc.querySelector('script[src*="oa.js"]')
 
   const options = optionsFromScript(script, win.location?.origin ?? '')
+  const strict = options.storage === 'none'
+
+  // ADR-0057 F6: an excluded browser installs nothing and sends nothing.
+  // Checked before the snippet is *validated* — so `#oa-ignore` still works on a
+  // page whose tag has no key — but after its attributes are read, because one
+  // of them decides whether this line may touch storage at all.
+  //
+  // **Strict mode has no exclusion flag, and cannot have one** (ADR-0064, D5).
+  // The flag is localStorage: setting it is storage on the visitor's device and
+  // reading it is access to it, which are the two halves of the thing strict
+  // mode promises not to do. A site that turns strict mode on gives up
+  // `#oa-ignore` in the same act — including any flag one of its operators had
+  // already set — and the alternative would be a mode whose central claim is
+  // false in a way nobody could see. `safeStorage`'s own write probe is part of
+  // this: it is why the store is not built at all here rather than built and
+  // left unused.
+  const localStore = strict ? memoryStorage() : safeStorage(win.localStorage ?? null)
+  if (!strict) {
+    const ignore = resolveIgnore(localStore, win.location?.hash ?? '')
+    if (ignore.changed) showIgnoreNotice(doc, ignore.changed)
+    if (ignore.ignored) return
+  }
+
   if (options.trackingKey === '' || options.collectorUrl === '') {
     win.console?.warn?.('[oa] missing data-key or data-collector; tracker not started')
     return
@@ -86,6 +101,10 @@ function boot(): void {
   const configDeps = {
     collectorUrl: options.collectorUrl,
     trackingKey: options.trackingKey,
+    // The config cache is the fourth thing that writes to the device, and the
+    // one `createTracker` cannot reach — it lives out here, beside the loader.
+    // In strict mode `localStore` is already the memory one, so the promise is
+    // not quietly broken by a five-minute cache entry.
     storage: localStore,
     now: () => Date.now(),
     ...fetchDeps,

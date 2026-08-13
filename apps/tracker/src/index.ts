@@ -50,9 +50,11 @@ export {
 
 export {
   DEFAULT_PRIVACY_POLICY,
+  LINKING_HINT_PROPERTY_KEYS,
   createPrivacyGate,
   readDnt,
   readGpc,
+  stripLinkingHints,
   type ConsentState,
   type PrivacyPolicy,
   type PrivacySignals,
@@ -70,7 +72,7 @@ export {
 } from './sanitize.ts'
 
 export { IGNORE_KEY, resolveIgnore, showIgnoreNotice, type IgnoreDecision } from './ignore.ts'
-export { createRetryQueue, createSessionTracker, safeStorage } from './storage.ts'
+export { createRetryQueue, createSessionTracker, memoryStorage, safeStorage } from './storage.ts'
 export { INGEST_CONTENT_TYPE, createTransport } from './transport.ts'
 export { createUuidV7, uuidV7 } from './uuid.ts'
 export { createEngagement } from './engagement.ts'

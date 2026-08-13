@@ -97,13 +97,18 @@ export function installTracker(
  *         data-collector="https://collect.example.com"></script>
  * ```
  *
- * The privacy attributes exist so a site can state its own policy today; their
- * defaults are still G-008's to close.
+ * `data-storage="none"` puts the tracker in strict mode (ADR-0064): memory-only,
+ * nothing written to the visitor's device.
+ *
+ * The privacy attributes let a site state its own policy: `data-respect-gpc`,
+ * `data-respect-dnt` and `data-require-consent` (G-008, closed by ADR-0057). Any
+ * value other than `'false'` or `'0'` reads as true; a missing attribute falls
+ * through to the default.
  */
 export function optionsFromScript(
   script: Element | null,
   fallbackOrigin: string,
-): Pick<TrackerOptions, 'trackingKey' | 'collectorUrl' | 'debug' | 'testMode'> & {
+): Pick<TrackerOptions, 'trackingKey' | 'collectorUrl' | 'debug' | 'testMode' | 'storage'> & {
   privacyPolicy: Partial<PrivacyPolicy>
 } {
   const attribute = (name: string): string | null => script?.getAttribute(name) ?? null
@@ -123,12 +128,18 @@ export function optionsFromScript(
 
   const debug = flag('data-debug')
   const testMode = flag('data-test-mode')
+  // `data-storage="none"` and nothing else. Read as an exact value rather than
+  // through `flag()`, because the other attributes are booleans whose default is
+  // the interesting half — this one names a mode, and a typo must fall back to
+  // the ordinary behaviour rather than to an unintended strictness.
+  const storage = attribute('data-storage') === 'none' ? ('none' as const) : undefined
 
   return {
     trackingKey: attribute('data-key') ?? '',
     collectorUrl: attribute('data-collector') ?? fallbackOrigin,
     ...(debug === undefined ? {} : { debug }),
     ...(testMode === undefined ? {} : { testMode }),
+    ...(storage === undefined ? {} : { storage }),
     privacyPolicy,
   }
 }
