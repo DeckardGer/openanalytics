@@ -35,3 +35,6 @@ Thumbs.db
 
 # Vercel CLI link state (per-machine)
 .vercel/
+
+# Claude Code permissions, per-machine and not part of the project
+.claude/settings.local.json
