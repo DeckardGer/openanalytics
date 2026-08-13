@@ -5561,9 +5561,13 @@ export interface components {
              *     Outside `features` on purpose. Those are measurement signals and
              *     default on; this one defaults **off** (ADR-0064 D4a), because
              *     sending it is what turns a count into a link to a named customer.
-             *     It is not a substitute for consent and does not override it: with
-             *     the flag on, the hint still waits for `oa.consent('granted')`; with
-             *     it off, no hint is sent even from a visitor who granted consent.
+             *     It is not a substitute for consent. With it off, no hint is sent
+             *     even from a visitor who granted consent. With it on, the hint
+             *     travels with any event the privacy gate already allows — and under
+             *     the shipped default (`requireConsent: false`) that includes a
+             *     visitor who has never answered a consent prompt. The obligation
+             *     that comes with linking a visitor to an order is the site's, and
+             *     the tracker does not withhold the hint on its behalf (ADR-0064).
              */
             attributed_revenue: boolean;
             /**
