@@ -1728,26 +1728,25 @@ const visitorTrailOperation = defineOperation({
     //
     // Bounded exactly as the bridge is: a non-empty hint (an empty one would
     // pool every hintless server-side row into one pseudo-visitor) and the same
-    // UTC date, so this never links across the daily rotation. An anonymous id
-    // never spans two dates by construction, so the date set below holds exactly
-    // one day — it is written as a set because the SQL cannot assume that.
+    // UTC date, so this never links across the daily rotation.
+    //
+    // `(session, date)` as one tuple rather than two independent `IN`s. Two sets
+    // would admit their cross-product — a session from one date paired with
+    // another date the visitor was seen on — which is unreachable today only
+    // because an anonymous id never spans two dates by construction. Pairing
+    // them says what is meant without leaning on that, and it costs one table
+    // scan instead of two (measured on production: 20,370 rows read against
+    // 30,555, 18 ms against 24 ms).
     `    ${VISITOR_IDENTITY} = {visitor:String}`,
     '    OR (',
     "      er.session_id != ''",
-    '      AND er.session_id IN (',
-    '        SELECT session_id FROM events_raw',
+    '      AND (er.session_id, toDate(er.occurred_at)) IN (',
+    '        SELECT session_id, toDate(occurred_at) FROM events_raw',
     '        WHERE site_id = {site_id:UUID}',
     '          AND anonymous_id = {visitor:String}',
     "          AND occurred_at >= toDateTime64({from:String}, 3, 'UTC')",
     "          AND occurred_at <  toDateTime64({to:String}, 3, 'UTC')",
     "          AND session_id != ''",
-    '      )',
-    '      AND toDate(er.occurred_at) IN (',
-    '        SELECT DISTINCT toDate(occurred_at) FROM events_raw',
-    '        WHERE site_id = {site_id:UUID}',
-    '          AND anonymous_id = {visitor:String}',
-    "          AND occurred_at >= toDateTime64({from:String}, 3, 'UTC')",
-    "          AND occurred_at <  toDateTime64({to:String}, 3, 'UTC')",
     '      )',
     '    )',
     '  )',
