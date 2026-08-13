@@ -361,6 +361,7 @@ export {
 
 export {
   listSiteDomains,
+  readSiteIngestSettings,
   resolveIngestConfig,
   upsertSiteIngestSettings,
   type ResolvedIngestConfig,

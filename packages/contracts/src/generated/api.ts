@@ -2712,6 +2712,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sites/{site_id}/ingest-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: components["parameters"]["SiteIdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What the site's browsers are configured to do (owner or admin).
+         * @description The stored half of `GET /v1/tracker/config`: the site timezone, the
+         *     query keys stripped in the browser, the heatmap sampling fraction, the
+         *     realtime interval, the signal feature flags and `attributed_revenue`.
+         *
+         *     A site that has never written these has no settings row at all, and this
+         *     endpoint answers with the product defaults rather than a 404 — that is
+         *     the state most sites are in, and it is not an error.
+         *
+         *     Session only, deliberately: an OAuth grant cannot reach it, so shipping
+         *     this writer adds no scope to the MCP surface (ADR-0048).
+         */
+        get: operations["getSiteIngestSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change what the site's browsers do (owner or admin).
+         * @description Every field is optional and absent means "leave it alone"; an empty body
+         *     is a `400` rather than a no-op, matching `PATCH /v1/sites/{site_id}`.
+         *
+         *     **Any accepted write bumps `sites.config_version`**, which is what
+         *     invalidates the tracker-config ETag, the CDN copy, the browser's own
+         *     cached copy and the collector's ingest-config cache together (ADR-0008).
+         *     The new `config_version` is in the response, so a caller can tell that
+         *     its change is the one browsers will now fetch.
+         *
+         *     `attributed_revenue` is the switch ADR-0064 D4a describes: with it off,
+         *     no browser sends the `order_id` linking hint, from anybody. It is off by
+         *     default for every site created after 2026-08-13; sites that had already
+         *     connected a revenue provider were backfilled to `true` (Postgres 0045).
+         */
+        patch: operations["updateSiteIngestSettings"];
+        trace?: never;
+    };
     "/v1/sites/{site_id}/widgets": {
         parameters: {
             query?: never;
@@ -7459,6 +7506,66 @@ export interface components {
              */
             revenue_events?: components["schemas"]["RevenueJourneyEntry"][];
         };
+        /**
+         * @description A site's tracker/ingest settings — the stored values `GET
+         *     /v1/tracker/config` is projected from. A site with no settings row is
+         *     served the product defaults, and this shape does not distinguish the two:
+         *     what a browser gets is the same either way.
+         */
+        SiteIngestSettings: {
+            /**
+             * @description The site's current configuration version, after this request. It
+             *     moves on every accepted write and is what invalidates every cached
+             *     copy of the tracker config (ADR-0008).
+             */
+            config_version: number;
+            timezone: components["schemas"]["Timezone"];
+            /**
+             * @description Query keys stripped from URLs **in the browser**, before anything is
+             *     sent. Stored lowercased and de-duplicated. Extends the server-side
+             *     default list rather than replacing it.
+             */
+            redact_query_keys: string[];
+            /** @description Fraction of clicks reported as heatmap `interaction` signals. */
+            interaction_sampling: number;
+            /**
+             * @description Realtime presence interval. The ceiling is derived from the presence
+             *     window rather than chosen (ADR-0035 D8): three intervals must fit
+             *     inside it, so a visitor survives two consecutive lost heartbeats.
+             */
+            heartbeat_interval_seconds: number;
+            features: {
+                web_vitals: boolean;
+                engagement: boolean;
+                interactions: boolean;
+                heartbeat: boolean;
+            };
+            /**
+             * @description Whether this site's browsers may send the revenue-linking hint —
+             *     the `order_id` property of a `conversion` event (ADR-0064 D4a).
+             *     Off by default, and not a substitute for consent: the obligation
+             *     that comes with linking a visitor to an order is the site's.
+             */
+            attributed_revenue: boolean;
+        };
+        /**
+         * @description Every field is optional; absent means "leave it alone", never "reset to
+         *     the default". An empty object is refused.
+         */
+        UpdateSiteIngestSettingsRequest: {
+            timezone?: components["schemas"]["Timezone"];
+            redact_query_keys?: string[];
+            interaction_sampling?: number;
+            heartbeat_interval_seconds?: number;
+            /** @description Patchable flag by flag; an unnamed flag keeps its value. */
+            features?: {
+                web_vitals?: boolean;
+                engagement?: boolean;
+                interactions?: boolean;
+                heartbeat?: boolean;
+            };
+            attributed_revenue?: boolean;
+        };
         /** @description A site's public-dashboard sharing configuration (docs snapshot 02 §20). */
         PublicDashboardSettings: {
             /** @description Master switch; off by default. */
@@ -11451,6 +11558,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicDashboardSettings"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["SiteNotFound"];
+        };
+    };
+    getSiteIngestSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: components["parameters"]["SiteIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current settings, or the defaults when no row exists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteIngestSettings"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["SiteNotFound"];
+        };
+    };
+    updateSiteIngestSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: components["parameters"]["SiteIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSiteIngestSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The settings as stored, with the bumped `config_version`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteIngestSettings"];
                 };
             };
             400: components["responses"]["ValidationFailed"];

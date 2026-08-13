@@ -171,6 +171,60 @@ export async function resolveIngestConfig(
   }
 }
 
+/**
+ * A site's stored tracker settings, for the management surface (ADR-0064 F4).
+ *
+ * Separate from `resolveIngestConfig` on purpose: that one is the ingest path's
+ * single query, keyed by a public tracking key and shaped by what the collector
+ * needs on every batch. This is a dashboard read keyed by site id, and it also
+ * carries `config_version`, which the settings surface needs so a caller can see
+ * that its write is the one browsers will now fetch.
+ *
+ * `null` when no such site exists. A site with no settings ROW is not null: it
+ * is served the defaults, which is the state most sites are in.
+ */
+export async function readSiteIngestSettings(
+  db: Database,
+  siteId: string,
+): Promise<{ settings: SiteTrackerSettings; configVersion: number } | null> {
+  const [row] = await db
+    .select({
+      configVersion: sites.configVersion,
+      timezone: siteIngestSettings.timezone,
+      redactQueryKeys: siteIngestSettings.redactQueryKeys,
+      interactionSampling: siteIngestSettings.interactionSampling,
+      heartbeatIntervalSeconds: siteIngestSettings.heartbeatIntervalSeconds,
+      featureWebVitals: siteIngestSettings.featureWebVitals,
+      featureEngagement: siteIngestSettings.featureEngagement,
+      featureInteractions: siteIngestSettings.featureInteractions,
+      featureHeartbeat: siteIngestSettings.featureHeartbeat,
+      attributedRevenue: siteIngestSettings.attributedRevenue,
+    })
+    .from(sites)
+    .leftJoin(siteIngestSettings, eq(siteIngestSettings.siteId, sites.id))
+    .where(eq(sites.id, siteId))
+
+  if (!row) return null
+
+  return {
+    configVersion: row.configVersion,
+    settings: {
+      timezone: row.timezone ?? DEFAULT_TRACKER_SETTINGS.timezone,
+      redactQueryKeys: row.redactQueryKeys ?? DEFAULT_TRACKER_SETTINGS.redactQueryKeys,
+      interactionSampling: row.interactionSampling ?? DEFAULT_TRACKER_SETTINGS.interactionSampling,
+      heartbeatIntervalSeconds:
+        row.heartbeatIntervalSeconds ?? DEFAULT_TRACKER_SETTINGS.heartbeatIntervalSeconds,
+      features: {
+        web_vitals: row.featureWebVitals ?? DEFAULT_TRACKER_SETTINGS.features.web_vitals,
+        engagement: row.featureEngagement ?? DEFAULT_TRACKER_SETTINGS.features.engagement,
+        interactions: row.featureInteractions ?? DEFAULT_TRACKER_SETTINGS.features.interactions,
+        heartbeat: row.featureHeartbeat ?? DEFAULT_TRACKER_SETTINGS.features.heartbeat,
+      },
+      attributedRevenue: row.attributedRevenue ?? DEFAULT_TRACKER_SETTINGS.attributedRevenue,
+    },
+  }
+}
+
 export interface UpsertSiteIngestSettingsInput {
   readonly siteId: string
   readonly timezone?: string

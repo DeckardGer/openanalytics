@@ -3300,6 +3300,81 @@ paths:
         '404':
           $ref: '#/components/responses/SiteNotFound'
 
+  /v1/sites/{site_id}/ingest-settings:
+    parameters:
+      - $ref: '#/components/parameters/SiteIdPath'
+    get:
+      operationId: getSiteIngestSettings
+      tags: [sites]
+      summary: What the site's browsers are configured to do (owner or admin).
+      description: |
+        The stored half of `GET /v1/tracker/config`: the site timezone, the
+        query keys stripped in the browser, the heatmap sampling fraction, the
+        realtime interval, the signal feature flags and `attributed_revenue`.
+
+        A site that has never written these has no settings row at all, and this
+        endpoint answers with the product defaults rather than a 404 — that is
+        the state most sites are in, and it is not an error.
+
+        Session only, deliberately: an OAuth grant cannot reach it, so shipping
+        this writer adds no scope to the MCP surface (ADR-0048).
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Current settings, or the defaults when no row exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteIngestSettings'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/SiteNotFound'
+    patch:
+      operationId: updateSiteIngestSettings
+      tags: [sites]
+      summary: Change what the site's browsers do (owner or admin).
+      description: |
+        Every field is optional and absent means "leave it alone"; an empty body
+        is a `400` rather than a no-op, matching `PATCH /v1/sites/{site_id}`.
+
+        **Any accepted write bumps `sites.config_version`**, which is what
+        invalidates the tracker-config ETag, the CDN copy, the browser's own
+        cached copy and the collector's ingest-config cache together (ADR-0008).
+        The new `config_version` is in the response, so a caller can tell that
+        its change is the one browsers will now fetch.
+
+        `attributed_revenue` is the switch ADR-0064 D4a describes: with it off,
+        no browser sends the `order_id` linking hint, from anybody. It is off by
+        default for every site created after 2026-08-13; sites that had already
+        connected a revenue provider were backfilled to `true` (Postgres 0045).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteIngestSettingsRequest'
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: The settings as stored, with the bumped `config_version`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteIngestSettings'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/SiteNotFound'
+
   /v1/sites/{site_id}/widgets:
     parameters:
       - $ref: '#/components/parameters/SiteIdPath'
@@ -10935,6 +11010,117 @@ components:
             visible session, which is the window rule, not a bug. Served under
             the same conditions as `revenue`; absent — not empty — for
             callers without `revenue:read`.
+
+    SiteIngestSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - config_version
+        - timezone
+        - redact_query_keys
+        - interaction_sampling
+        - heartbeat_interval_seconds
+        - features
+        - attributed_revenue
+      description: |
+        A site's tracker/ingest settings — the stored values `GET
+        /v1/tracker/config` is projected from. A site with no settings row is
+        served the product defaults, and this shape does not distinguish the two:
+        what a browser gets is the same either way.
+      properties:
+        config_version:
+          type: integer
+          minimum: 1
+          description: |
+            The site's current configuration version, after this request. It
+            moves on every accepted write and is what invalidates every cached
+            copy of the tracker config (ADR-0008).
+        timezone:
+          $ref: '#/components/schemas/Timezone'
+        redact_query_keys:
+          type: array
+          maxItems: 200
+          items:
+            type: string
+            maxLength: 64
+          description: |
+            Query keys stripped from URLs **in the browser**, before anything is
+            sent. Stored lowercased and de-duplicated. Extends the server-side
+            default list rather than replacing it.
+        interaction_sampling:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction of clicks reported as heatmap `interaction` signals.
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 5
+          maximum: 100
+          description: |
+            Realtime presence interval. The ceiling is derived from the presence
+            window rather than chosen (ADR-0035 D8): three intervals must fit
+            inside it, so a visitor survives two consecutive lost heartbeats.
+        features:
+          type: object
+          additionalProperties: false
+          required: [web_vitals, engagement, interactions, heartbeat]
+          properties:
+            web_vitals:
+              type: boolean
+            engagement:
+              type: boolean
+            interactions:
+              type: boolean
+            heartbeat:
+              type: boolean
+        attributed_revenue:
+          type: boolean
+          description: |
+            Whether this site's browsers may send the revenue-linking hint —
+            the `order_id` property of a `conversion` event (ADR-0064 D4a).
+            Off by default, and not a substitute for consent: the obligation
+            that comes with linking a visitor to an order is the site's.
+
+    UpdateSiteIngestSettingsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: |
+        Every field is optional; absent means "leave it alone", never "reset to
+        the default". An empty object is refused.
+      properties:
+        timezone:
+          $ref: '#/components/schemas/Timezone'
+        redact_query_keys:
+          type: array
+          maxItems: 200
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+        interaction_sampling:
+          type: number
+          minimum: 0
+          maximum: 1
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 5
+          maximum: 100
+        features:
+          type: object
+          additionalProperties: false
+          description: Patchable flag by flag; an unnamed flag keeps its value.
+          properties:
+            web_vitals:
+              type: boolean
+            engagement:
+              type: boolean
+            interactions:
+              type: boolean
+            heartbeat:
+              type: boolean
+        attributed_revenue:
+          type: boolean
 
     PublicDashboardSettings:
       type: object

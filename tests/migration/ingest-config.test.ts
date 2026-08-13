@@ -4,6 +4,7 @@ import {
   createPool,
   createSiteWithOwner,
   newId,
+  readSiteIngestSettings,
   resolveIngestConfig,
   upsertSiteIngestSettings,
   type Database,
@@ -240,6 +241,43 @@ describeIfPostgres('site ingest config resolution', () => {
     expect(again?.settings.timezone).toBe('Europe/Berlin')
     // A partial update must not silently discard the rest of the row.
     expect(again?.settings.redactQueryKeys).toEqual(['token', 'email'])
+  })
+
+  it('reads a site settings by id, defaults and all (ADR-0064 F4)', async () => {
+    // The management surface's read. Separate from `resolveIngestConfig`, which
+    // is keyed by a public tracking key — this one is keyed by site id and also
+    // carries `config_version`, because the settings screen needs to see that
+    // its own write is the one browsers will now fetch.
+    const { siteId } = await newSiteWithKey()
+
+    // A site with no settings ROW is not an error and is not a 404: it is the
+    // state most sites are in, and it answers with the product defaults.
+    const before = await readSiteIngestSettings(db, siteId)
+    expect(before?.settings).toEqual(DEFAULT_TRACKER_SETTINGS)
+    expect(before?.configVersion).toBe(1)
+
+    const written = await upsertSiteIngestSettings(db, {
+      siteId,
+      timezone: 'Asia/Baku',
+      interactionSampling: 0.5,
+      features: { interactions: false },
+      attributedRevenue: true,
+    })
+
+    const after = await readSiteIngestSettings(db, siteId)
+    expect(after?.configVersion).toBe(written.configVersion)
+    expect(after?.settings.timezone).toBe('Asia/Baku')
+    expect(after?.settings.interactionSampling).toBeCloseTo(0.5)
+    expect(after?.settings.attributedRevenue).toBe(true)
+    // An unnamed flag keeps its value rather than being reset by the write.
+    expect(after?.settings.features).toEqual({
+      web_vitals: true,
+      engagement: true,
+      interactions: false,
+      heartbeat: true,
+    })
+
+    expect(await readSiteIngestSettings(db, newId())).toBeNull()
   })
 
   it('serves attributed revenue off until a site opts in (ADR-0064 D4a)', async () => {

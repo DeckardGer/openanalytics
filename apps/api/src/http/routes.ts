@@ -13,12 +13,14 @@ import {
   normalizeReportingCurrency,
   normalizeSiteDomainSet,
   normalizeSiteName,
+  normalizeTrackerSettingsPatch,
   SITE_DOMAIN_MAX_COUNT,
   type ApiKeyHolder,
   type AssistantConfig,
   type ReadScope,
   type RevenueAdapterRegistry,
   type ServiceEnv,
+  type SiteTrackerSettings,
 } from '@openanalytics/domain'
 import {
   EMAIL_OUTBOX_TOPIC,
@@ -43,6 +45,7 @@ import {
   listMembers,
   listSiteInvites,
   listSitesForUser,
+  readSiteIngestSettings,
   removeMember,
   resendInvite,
   resolveSlugForUser,
@@ -52,6 +55,7 @@ import {
   updateMemberRole,
   updatePublicDashboardSettings,
   updateSiteSettings,
+  upsertSiteIngestSettings,
   type ApiKeySummary,
   type ApiKeyType,
   type Database,
@@ -1334,6 +1338,87 @@ export function createBusinessRoutes(deps: RoutesDeps): Hono<Env> {
         // that was expired a moment ago.
         status: 'pending',
       })
+    },
+  )
+
+  /**
+   * A site's tracker/ingest settings — the writer ADR-0064 F4 asked for.
+   *
+   * `site_ingest_settings` has existed since M5 and until now **no route wrote
+   * any column of it**: the feature flags, the heatmap sampling fraction, the
+   * heartbeat interval and the site timezone were settable only from the
+   * repository, and `attributed_revenue` (ADR-0064 D4a) shipped into the same
+   * hole — a switch the product describes as the customer's choice, that the
+   * customer had no way to make. This closes it for the whole family rather than
+   * for one flag, because the second field would otherwise be a second contract
+   * change for no reason.
+   *
+   * `site:settings` (owner + admin), matching `PATCH /v1/sites/:site_id`: this
+   * is the same class of administrative act as replacing the origin allowlist —
+   * it configures how the site is measured, exposes no customer data and is not
+   * destructive. Reading is gated the same way rather than left to any member,
+   * because the read is the write's own form state and a viewer has nothing to
+   * do with it.
+   *
+   * Deliberately session-only. An OAuth grant cannot reach these routes, so the
+   * MCP surface gains no scope and `GRANT_WRITE_ALLOWLIST` gains no row
+   * (ADR-0048): a settings toggle that changes what every visitor's browser does
+   * is not a thing to hand to an agent on the strength of a scope name.
+   */
+  const ingestSettingsJson = (result: {
+    settings: SiteTrackerSettings
+    configVersion: number
+  }) => ({
+    config_version: result.configVersion,
+    timezone: result.settings.timezone,
+    redact_query_keys: [...result.settings.redactQueryKeys],
+    interaction_sampling: result.settings.interactionSampling,
+    heartbeat_interval_seconds: result.settings.heartbeatIntervalSeconds,
+    features: { ...result.settings.features },
+    attributed_revenue: result.settings.attributedRevenue,
+  })
+
+  authed.get(
+    '/sites/:site_id/ingest-settings',
+    siteMembership(db),
+    requireCapability('site:settings'),
+    async (c) => {
+      const { siteId } = c.get('membership')
+      const current = await readSiteIngestSettings(db, siteId)
+      // The membership middleware already proved the site exists and the caller
+      // is party to it, so a null here is a site deleted between the two reads.
+      if (!current) throw new ApiError('SITE_NOT_FOUND', 'No such site')
+      return c.json(ingestSettingsJson(current))
+    },
+  )
+
+  authed.patch(
+    '/sites/:site_id/ingest-settings',
+    siteMembership(db),
+    requireCapability('site:settings'),
+    async (c) => {
+      const { siteId } = c.get('membership')
+      const body = await readJson(c)
+
+      // Validation lives in the domain rather than here: every bound has a twin
+      // in the published `TrackerConfig` contract or in a column CHECK, and a
+      // value that got past the route and was refused by Postgres would reach
+      // the caller as a 500 for what is a form mistake.
+      const normalized = normalizeTrackerSettingsPatch(body, isValidTimezone)
+      if (!normalized.ok) {
+        validationFailed(
+          'The ingest settings patch is not valid',
+          normalized.issues.map((issue) => ({ field: issue.field, code: issue.code })),
+        )
+      }
+
+      // The bump is inside this call, in the same transaction as the write
+      // (ADR-0008). Nothing here has to remember it, which is the point.
+      await upsertSiteIngestSettings(db, { siteId, ...normalized.patch })
+
+      const current = await readSiteIngestSettings(db, siteId)
+      if (!current) throw new ApiError('SITE_NOT_FOUND', 'No such site')
+      return c.json(ingestSettingsJson(current))
     },
   )
 

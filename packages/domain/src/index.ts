@@ -298,8 +298,12 @@ export {
   DEFAULT_TRACKER_SETTINGS,
   InvalidHeartbeatIntervalError,
   isValidHeartbeatIntervalSeconds,
+  normalizeTrackerSettingsPatch,
   type SiteTrackerSettings,
   type TrackerFeatureFlags,
+  type TrackerSettingsIssue,
+  type TrackerSettingsPatch,
+  type TrackerSettingsPatchResult,
 } from './tracker-settings.ts'
 
 export {

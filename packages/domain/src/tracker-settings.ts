@@ -42,13 +42,12 @@ export function isValidHeartbeatIntervalSeconds(seconds: number): boolean {
 /**
  * Thrown by a settings write given a value the presence window forbids.
  *
- * **An HTTP writer must map this to `400 VALIDATION_FAILED`.** There is none
- * today — `heartbeat_interval_seconds` appears in `trackerConfigSchema`, which
- * is parsed on the way *out* (`apps/collector/src/tracker-config.ts:120`), and
- * no endpoint accepts it as input. Whoever adds the site-settings PATCH has to
- * catch this: an uncaught throw out of a route handler is a 500, and a customer
- * typing 200 into a form deserves to be told the bound, not shown a server
- * error.
+ * **An HTTP writer must map this to `400 VALIDATION_FAILED`**, and since
+ * 2026-08-13 there is one: `PATCH /v1/sites/{site_id}/ingest-settings`
+ * (ADR-0064 F4). It refuses the value *before* the repository is called, through
+ * `normalizeTrackerSettingsPatch` below, so this error stays the last line of
+ * defence rather than the first — an uncaught throw out of a route handler is a
+ * 500, and a customer typing 200 into a form deserves to be told the bound.
  */
 export class InvalidHeartbeatIntervalError extends Error {
   readonly seconds: number
@@ -121,4 +120,169 @@ export const DEFAULT_TRACKER_SETTINGS: SiteTrackerSettings = {
     heartbeat: true,
   },
   attributedRevenue: false,
+}
+
+/** The patch a settings write may carry. Every field is optional and absent
+ * means "leave it alone" — never "reset it to the default". */
+export interface TrackerSettingsPatch {
+  readonly timezone?: string
+  readonly redactQueryKeys?: readonly string[]
+  readonly interactionSampling?: number
+  readonly heartbeatIntervalSeconds?: number
+  readonly features?: Partial<TrackerFeatureFlags>
+  readonly attributedRevenue?: boolean
+}
+
+/** One rejected field, in the shape the HTTP layer reports validation issues. */
+export interface TrackerSettingsIssue {
+  readonly field: string
+  readonly code: string
+}
+
+export type TrackerSettingsPatchResult =
+  | { readonly ok: true; readonly patch: TrackerSettingsPatch }
+  | { readonly ok: false; readonly issues: readonly TrackerSettingsIssue[] }
+
+/** Bounds mirrored from the published `TrackerConfig` contract, so a value the
+ * browser would refuse cannot be stored in the first place. */
+const REDACT_KEYS_MAX_COUNT = 200
+const REDACT_KEY_MAX_LENGTH = 64
+const FEATURE_NAMES = ['web_vitals', 'engagement', 'interactions', 'heartbeat'] as const
+
+/**
+ * Normalize an untrusted settings patch (ADR-0064 F4).
+ *
+ * Pure, and deliberately outside the route: what makes a settings value legal is
+ * a property of the product, not of one HTTP handler, and every bound here has a
+ * twin in the `TrackerConfig` contract or in a column CHECK. A value that got
+ * past this function and was then refused by Postgres would reach the caller as
+ * a 500 — a driver error for what is a form mistake.
+ *
+ * Absent is not the same as null: this returns only the keys the caller actually
+ * sent, so a patch that mentions one flag cannot silently reset the rest.
+ *
+ * `isValidTimezone` is NOT applied here — the caller supplies it, because the
+ * runtime's tz database is the authority and `@openanalytics/domain` must not
+ * import the contracts package for one predicate.
+ */
+export function normalizeTrackerSettingsPatch(
+  input: unknown,
+  isValidTimezone: (value: string) => boolean,
+): TrackerSettingsPatchResult {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    return { ok: false, issues: [{ field: 'body', code: 'not_an_object' }] }
+  }
+
+  const body = input as Record<string, unknown>
+  const issues: TrackerSettingsIssue[] = []
+  const patch: {
+    timezone?: string
+    redactQueryKeys?: string[]
+    interactionSampling?: number
+    heartbeatIntervalSeconds?: number
+    features?: Partial<TrackerFeatureFlags>
+    attributedRevenue?: boolean
+  } = {}
+
+  if (Object.hasOwn(body, 'timezone')) {
+    const value = body['timezone']
+    if (typeof value !== 'string' || !isValidTimezone(value)) {
+      issues.push({ field: 'timezone', code: 'invalid' })
+    } else {
+      patch.timezone = value
+    }
+  }
+
+  if (Object.hasOwn(body, 'redact_query_keys')) {
+    const value = body['redact_query_keys']
+    if (!Array.isArray(value)) {
+      issues.push({ field: 'redact_query_keys', code: 'not_an_array' })
+    } else if (value.length > REDACT_KEYS_MAX_COUNT) {
+      issues.push({ field: 'redact_query_keys', code: 'too_many' })
+    } else {
+      // Lowercased and de-duplicated here rather than at read time: the resolver
+      // lowercases what it reads, so storing mixed case would make the stored
+      // row and the served config disagree for no reason anybody could see.
+      const keys: string[] = []
+      let bad = false
+      for (const entry of value) {
+        if (
+          typeof entry !== 'string' ||
+          entry.length === 0 ||
+          entry.length > REDACT_KEY_MAX_LENGTH
+        ) {
+          bad = true
+          break
+        }
+        const normalized = entry.trim().toLowerCase()
+        if (normalized !== '' && !keys.includes(normalized)) keys.push(normalized)
+      }
+      if (bad) issues.push({ field: 'redact_query_keys', code: 'invalid' })
+      else patch.redactQueryKeys = keys
+    }
+  }
+
+  if (Object.hasOwn(body, 'interaction_sampling')) {
+    const value = body['interaction_sampling']
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      issues.push({ field: 'interaction_sampling', code: 'out_of_range' })
+    } else {
+      patch.interactionSampling = value
+    }
+  }
+
+  if (Object.hasOwn(body, 'heartbeat_interval_seconds')) {
+    const value = body['heartbeat_interval_seconds']
+    if (typeof value !== 'number' || !isValidHeartbeatIntervalSeconds(value)) {
+      // The presence window is what bounds this (ADR-0035 D8), and the reason it
+      // is refused rather than clamped is that the thing a bad value produces is
+      // a flickering realtime board, which reads as a bug in everything except
+      // the setting that caused it.
+      issues.push({ field: 'heartbeat_interval_seconds', code: 'out_of_range' })
+    } else {
+      patch.heartbeatIntervalSeconds = value
+    }
+  }
+
+  if (Object.hasOwn(body, 'features')) {
+    const value = body['features']
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      issues.push({ field: 'features', code: 'not_an_object' })
+    } else {
+      const features: { -readonly [K in keyof TrackerFeatureFlags]?: boolean } = {}
+      const record = value as Record<string, unknown>
+      for (const name of Object.keys(record)) {
+        if (!(FEATURE_NAMES as readonly string[]).includes(name)) {
+          issues.push({ field: `features.${name}`, code: 'unknown' })
+          continue
+        }
+        const flag = record[name]
+        if (typeof flag !== 'boolean') {
+          issues.push({ field: `features.${name}`, code: 'not_a_boolean' })
+          continue
+        }
+        features[name as keyof TrackerFeatureFlags] = flag
+      }
+      if (Object.keys(features).length > 0) patch.features = features
+    }
+  }
+
+  if (Object.hasOwn(body, 'attributed_revenue')) {
+    const value = body['attributed_revenue']
+    if (typeof value !== 'boolean') {
+      issues.push({ field: 'attributed_revenue', code: 'not_a_boolean' })
+    } else {
+      patch.attributedRevenue = value
+    }
+  }
+
+  if (issues.length > 0) return { ok: false, issues }
+  if (Object.keys(patch).length === 0) {
+    // An empty patch is refused rather than treated as a no-op, matching the
+    // site settings PATCH: a save that changed nothing is far more likely a
+    // client bug than an intention, and it would still bump `config_version`
+    // and re-fetch every browser's configuration for nothing.
+    return { ok: false, issues: [{ field: 'body', code: 'required_one_of' }] }
+  }
+  return { ok: true, patch }
 }
