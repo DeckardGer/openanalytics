@@ -148,8 +148,20 @@ function looksLikeOpaqueToken(value: string): boolean {
  * It also re-aligns the two halves of the pipeline: the tracker's own
  * client-side `redactText` has never had an opaque-token rule, so until now the
  * browser sent the real id and the collector destroyed it on arrival.
+ *
+ * **The same list carries a second rule (ADR-0064 D4a).** A key is exempt here
+ * *because* its value is a provider id that ties a visitor to a record on the
+ * provider's side — which is precisely what makes it a linking hint, so
+ * `stripLinkingHints` reads this list rather than declaring a second one that
+ * would drift from it. The tracker's `LINKING_HINT_PROPERTY_KEYS`
+ * (`apps/tracker/src/privacy.ts`) is the one unavoidable copy: that package is
+ * dependency-free by design and cannot import this one, so the two are pinned
+ * equal by a test instead (`tests/tracker/privacy.test.ts`). Should a key ever
+ * need one role without the other, split the list at that moment and not
+ * before — two lists that are always equal are one list with two chances to be
+ * edited badly.
  */
-const OPAQUE_ID_PROPERTY_KEYS: readonly string[] = ['order_id']
+export const OPAQUE_ID_PROPERTY_KEYS: readonly string[] = ['order_id']
 
 /** The longest value the `order_id` exemption covers. */
 export const OPAQUE_ID_MAX_LENGTH = 128
@@ -354,6 +366,58 @@ export function sanitizeProperties(
   }
 
   return { properties: out, dropped }
+}
+
+/**
+ * Remove the linking hints from an event's properties unless the site allows
+ * them (ADR-0064 D4a, server half).
+ *
+ * The tracker already strips these before sending, and nothing enforces that a
+ * client is the tracker: a modified script, a cached bundle from before the flag
+ * existed, or anything posting to `/v1/events` with a valid write key can send
+ * `order_id` for a site that never turned attributed revenue on. D4a is
+ * described as a control in the published privacy notice, and a control that
+ * only holds when the browser cooperates is not one — the same reasoning that
+ * put a server backstop behind the client-side GPC gate (ADR-0057 D5) and behind
+ * the tracker's own interaction redaction (D6).
+ *
+ * This does not reopen D4a's rejected alternative. That alternative was to let
+ * the hint flow and filter it *here instead of* in the browser; the browser rule
+ * still stands and remains the one that keeps the hint off the wire. This is the
+ * second half of the same rule, and the counter its caller increments is what
+ * makes the difference between the two halves visible rather than assumed.
+ *
+ * **The event itself is never dropped**: a conversion is a measurement signal
+ * and stays one, whatever the flag says. What it loses is the property that
+ * would tie the visitor to an order. An event left with nothing keeps the empty
+ * bag the envelope already uses for "no properties" — the server envelope's
+ * `properties` is always an object, so there is no bagless shape to produce here
+ * and no way to tell a stripped event from one that never carried a hint.
+ *
+ * Returns the input map untouched when there is nothing to remove, which is
+ * every ordinary event.
+ */
+export function stripLinkingHints(
+  properties: EventProperties,
+  allowed: boolean,
+): SanitizedProperties {
+  if (allowed) return { properties, dropped: [] }
+
+  const kept: Record<string, string | number | boolean | null> = {}
+  const dropped: string[] = []
+
+  for (const [key, value] of Object.entries(properties)) {
+    // Case-insensitively, like the tracker and like the redaction exemption
+    // above: `Order_Id` is the same hint, and the matcher's own lowercase read
+    // is not what decides whether the hint was meant.
+    if (isOpaqueIdPropertyKey(key)) {
+      dropped.push(key)
+      continue
+    }
+    kept[key] = value
+  }
+
+  return dropped.length === 0 ? { properties, dropped } : { properties: kept, dropped }
 }
 
 /**

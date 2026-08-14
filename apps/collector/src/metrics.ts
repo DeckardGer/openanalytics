@@ -53,6 +53,14 @@ export const COLLECTOR_METRICS = {
    * means a site disabled `data-respect-gpc` or a stale bundle is in the wild. */
   gpcFiltered: 'collector_gpc_filtered',
 
+  /** An event arrived carrying a linking hint (`order_id`) for a site whose
+   * `attributed_revenue` is off; the property was removed and the event kept
+   * (ADR-0064 D4a, server half). Labelled by `site_id`: the tracker strips the
+   * hint before sending, so a sustained rate on one site means a stale bundle or
+   * an integration posting to `/v1/events` directly — this counter is the only
+   * thing that makes that gap visible. */
+  linkingHintFiltered: 'collector_linking_hint_filtered',
+
   /** Limiter store unreachable; bounded fail-open in effect (G-005). */
   limiterFailOpen: 'collector_limiter_fail_open',
   /** Fail-open expired; the in-process fallback limiter is now deciding. */

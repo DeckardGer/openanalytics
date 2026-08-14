@@ -5,7 +5,12 @@ import {
   type CollectorDeps,
 } from '../../apps/collector/src/index.ts'
 import { persistedEventSchema } from '@openanalytics/contracts'
-import { DEFAULT_TRACKER_SETTINGS, loadPolicy, type SiteIngestConfig } from '@openanalytics/domain'
+import {
+  DEFAULT_TRACKER_SETTINGS,
+  loadPolicy,
+  type SiteIngestConfig,
+  type SiteTrackerSettings,
+} from '@openanalytics/domain'
 import {
   createRecordingMetrics,
   createServiceMetadata,
@@ -248,6 +253,8 @@ interface Harness {
 function harness(
   options: {
     config?: SiteIngestConfig
+    /** The site's ingest settings, for the ADR-0064 D4a linking tests. */
+    settings?: SiteTrackerSettings
     now?: Date
     /** The site's published rules, for the ADR-0034 D5 origin tests. */
     noCodeRules?: readonly {
@@ -263,14 +270,13 @@ function harness(
   const realtime = new FakeRealtime()
   const metrics = createRecordingMetrics()
   const config = options.config ?? siteConfig()
+  const settings = options.settings ?? DEFAULT_TRACKER_SETTINGS
   const noCodeRules = options.noCodeRules ?? []
 
   const ingest: CollectorDeps = {
     configStore: {
       resolve: async (key: string) =>
-        key === TRACKING_KEY
-          ? { config, settings: DEFAULT_TRACKER_SETTINGS, slug: 'shop', noCodeRules }
-          : null,
+        key === TRACKING_KEY ? { config, settings, slug: 'shop', noCodeRules } : null,
       invalidate: () => undefined,
     },
     queue,
@@ -440,6 +446,66 @@ describe('POST /v1/events', () => {
     const payload = h.queue.enqueued[0]?.payload ?? ''
     expect(payload).not.toContain('someone@example.com')
     expect(payload).toContain('[redacted]')
+  })
+
+  describe('the linking hint, server-side (ADR-0064 D4a)', () => {
+    const conversion = (properties: Record<string, unknown>) => ({
+      event_id: uuidV7(),
+      type: 'conversion' as const,
+      name: 'purchase',
+      occurred_at: NOW.toISOString(),
+      page: { url: 'https://shop.example.com/thanks' },
+      properties,
+    })
+
+    const propertiesOf = (h: Harness): Record<string, unknown> =>
+      persistedEventSchema.parse(JSON.parse(h.queue.enqueued[0]?.payload ?? '{}')).properties
+
+    it('strips order_id from a modified client when the site has the flag off', async () => {
+      // The tracker strips this before sending, and nothing enforces that the
+      // client is the tracker: a stale bundle, an edited script or anything
+      // posting with a valid write key can send it anyway. The site never turned
+      // attributed revenue on, so the hint must not become durable data.
+      const response = await h.post(
+        '/v1/events',
+        batchOf([conversion({ order_id: 'cs_test_a1B2c3', plan: 'growth' })]),
+      )
+
+      // The conversion itself is measurement and is still accepted and counted.
+      expect(response.status).toBe(202)
+      expect(await response.json()).toEqual({ accepted: 1, duplicate: 0 })
+      expect(propertiesOf(h)).toEqual({ plan: 'growth' })
+      expect(h.queue.enqueued[0]?.payload).not.toContain('cs_test_a1B2c3')
+
+      expect(h.metrics.countOf('collector_linking_hint_filtered')).toBe(1)
+      expect(
+        h.metrics.recorded.find((entry) => entry.name === 'collector_linking_hint_filtered')
+          ?.labels,
+      ).toMatchObject({ site_id: 'site-1' })
+    })
+
+    it('stores it for a site that turned attributed revenue on', async () => {
+      // The control. Without it the assertion above would also pass if the
+      // property never survived sanitization for any other reason.
+      const optedIn = harness({
+        settings: { ...DEFAULT_TRACKER_SETTINGS, attributedRevenue: true },
+      })
+
+      await optedIn.post(
+        '/v1/events',
+        batchOf([conversion({ order_id: 'cs_test_a1B2c3', plan: 'growth' })]),
+      )
+
+      expect(propertiesOf(optedIn)).toEqual({ order_id: 'cs_test_a1B2c3', plan: 'growth' })
+      expect(optedIn.metrics.countOf('collector_linking_hint_filtered')).toBe(0)
+    })
+
+    it('leaves an ordinary event untouched and counts nothing', async () => {
+      await h.post('/v1/events', batchOf([conversion({ plan: 'growth', value: 49 })]))
+
+      expect(propertiesOf(h)).toEqual({ plan: 'growth', value: 49 })
+      expect(h.metrics.countOf('collector_linking_hint_filtered')).toBe(0)
+    })
   })
 
   describe('all-or-nothing batch acceptance (§7.3)', () => {

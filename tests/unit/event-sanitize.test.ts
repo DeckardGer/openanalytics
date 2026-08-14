@@ -5,11 +5,13 @@ import {
   attributionFrom,
   containsSensitiveText,
   isOpaqueIdPropertyKey,
+  OPAQUE_ID_PROPERTY_KEYS,
   redactSensitiveText,
   sanitizeElementText,
   sanitizeInteraction,
   sanitizeProperties,
   sanitizeUrl,
+  stripLinkingHints,
 } from '@openanalytics/domain'
 import { describe, expect, it } from 'vitest'
 
@@ -308,6 +310,57 @@ describe('the `order_id` exemption (M12 CP7 defect 1)', () => {
     expect(isOpaqueIdPropertyKey('order_id')).toBe(true)
     expect(isOpaqueIdPropertyKey(' ORDER_ID ')).toBe(true)
     expect(isOpaqueIdPropertyKey('order')).toBe(false)
+  })
+})
+
+describe('the linking hint, server-side (ADR-0064 D4a)', () => {
+  const bag = { order_id: 'cs_test_a1B2c3', plan: 'growth', seats: 3 }
+
+  it('removes the hint for a site that has not turned attributed revenue on', () => {
+    const out = stripLinkingHints(bag, false)
+
+    expect(out.properties).toEqual({ plan: 'growth', seats: 3 })
+    expect(out.dropped).toEqual(['order_id'])
+    // The input is not mutated: the caller's sanitized map is still whole, and
+    // two callers sharing one map cannot strip it for each other.
+    expect(bag.order_id).toBe('cs_test_a1B2c3')
+  })
+
+  it('passes the hint through for a site that did — the positive control', () => {
+    const out = stripLinkingHints(bag, true)
+
+    expect(out.properties).toEqual(bag)
+    expect(out.dropped).toEqual([])
+  })
+
+  it('matches the key case-insensitively, as the tracker does', () => {
+    expect(stripLinkingHints({ Order_Id: 'pi_1', ' ORDER_ID ': 'pi_2' }, false).dropped).toEqual([
+      'Order_Id',
+      ' ORDER_ID ',
+    ])
+    // Nothing is inferred from a substring: the exemption names one key.
+    expect(stripLinkingHints({ internal_order_id: 'x' }, false).dropped).toEqual([])
+  })
+
+  it('leaves an event with an empty bag rather than dropping the event', () => {
+    // The conversion is a measurement signal and stays one; the server envelope
+    // already spells "no properties" as `{}`, so a stripped event is
+    // indistinguishable from one that never carried a hint.
+    expect(stripLinkingHints({ order_id: 'pi_1' }, false).properties).toEqual({})
+  })
+
+  it('returns the same map when there is nothing to remove', () => {
+    const ordinary = { plan: 'growth' }
+    expect(stripLinkingHints(ordinary, false).properties).toBe(ordinary)
+  })
+
+  it('reads the one list the opaque-id exemption already keeps', () => {
+    // One list, two rules: a key is exempt from opaque-token redaction because
+    // it carries a provider id, which is exactly what makes it a linking hint.
+    for (const key of OPAQUE_ID_PROPERTY_KEYS) {
+      expect(isOpaqueIdPropertyKey(key)).toBe(true)
+      expect(stripLinkingHints({ [key]: 'pi_1' }, false).dropped).toEqual([key])
+    }
   })
 })
 

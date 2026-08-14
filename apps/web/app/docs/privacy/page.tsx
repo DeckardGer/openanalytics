@@ -68,6 +68,7 @@ oa.consent("denied");`}</DocCode>
             "With data-require-consent, nothing is collected until granted.",
             "Denied is final for that visitor regardless of any other setting, and the choice persists in localStorage on their device — or for the page only, in strict mode.",
             "Every signal the script could send passes through one decision point; there is no path around it.",
+            "With attributed revenue off, no order_id is sent — and one that arrives anyway is dropped on the server, so that switch does not depend on the browser.",
           ]}
         />
       </DocSection>

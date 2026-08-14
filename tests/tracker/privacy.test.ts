@@ -1,8 +1,10 @@
 import {
   DEFAULT_PRIVACY_POLICY,
+  LINKING_HINT_PROPERTY_KEYS,
   createPrivacyGate,
   safeStorage,
 } from '../../apps/tracker/src/index.ts'
+import { OPAQUE_ID_PROPERTY_KEYS } from '@openanalytics/domain'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHarness, resetBrowser } from './harness.ts'
 
@@ -178,6 +180,15 @@ describe('privacy gate', () => {
     expect(conversion).toBeDefined()
     expect(conversion && 'properties' in conversion).toBe(false)
     harness.stop()
+  })
+
+  it('names the same hints the server strips', () => {
+    // The tracker package is dependency-free by design, so this list cannot be
+    // imported from `@openanalytics/domain` and is the one unavoidable copy of
+    // it. Both halves of D4a enforce the same rule and must therefore mean the
+    // same keys by it: a key added on one side only would be a hint one half
+    // removes and the other passes through.
+    expect([...LINKING_HINT_PROPERTY_KEYS]).toEqual([...OPAQUE_ID_PROPERTY_KEYS])
   })
 
   it('reads both GPC and DNT from the host, not from a cached snapshot', () => {

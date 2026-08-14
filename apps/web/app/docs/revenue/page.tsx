@@ -32,7 +32,11 @@ export default function RevenueDocsPage() {
           <strong>Attributed revenue</strong> on when connecting Stripe — until
           you do, the script sends no <Code>order_id</Code> at all and the
           conversion is just a count — and the linking itself carries a consent
-          obligation you meet as the controller of your site.
+          obligation you meet as the controller of your site. The switch is
+          enforced on both sides: an <Code>order_id</Code> that arrives while it
+          is off, from a cached copy of the script or a request you wrote
+          yourself, is dropped from the event before it is stored. The
+          conversion is still counted.
         </p>
         <DocCode caption="wherever you record the visitor's choice">{`oa.consent("granted"); // or "denied", which stops collection entirely`}</DocCode>
         <p>

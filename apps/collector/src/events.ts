@@ -19,6 +19,7 @@ import {
   sanitizeInteraction,
   sanitizeProperties,
   sanitizeUrl,
+  stripLinkingHints,
   type ClassificationCandidate,
   type SiteIngestConfig,
 } from '@openanalytics/domain'
@@ -230,6 +231,7 @@ export function createEventRoutes(deps: CollectorDeps, limiter: IngestLimiter) {
         batch,
         gateConfig: config,
         redactQueryKeys: settings.redactQueryKeys,
+        attributedRevenue: settings.attributedRevenue,
         occurredAt: time.occurredAt,
         clockSkewed: time.clockSkewed,
         receivedAt: gate.receivedAt,
@@ -402,6 +404,8 @@ interface BuildPersistedInput {
   readonly batch: EventBatch
   readonly gateConfig: SiteIngestConfig
   readonly redactQueryKeys: readonly string[]
+  /** The site's own linking switch (ADR-0064 D4a). Off removes `order_id`. */
+  readonly attributedRevenue: boolean
   readonly occurredAt: Date
   readonly clockSkewed: boolean
   readonly receivedAt: Date
@@ -451,9 +455,20 @@ function buildPersistedEvent(input: BuildPersistedInput): PersistedEvent {
     pageUrl: event.page?.url,
   })
   const attribution = attributionFrom(page)
-  const properties = event.properties
+  // Two passes, and the order matters: sanitization decides what may be stored
+  // at all, and the linking rule then decides whether what survived may be a
+  // hint. Re-checked here rather than trusted from the browser (ADR-0064 D4a,
+  // server half) — the tracker already strips it, and this is the half that
+  // holds when the client is not the tracker. The counter is per site because a
+  // sustained rate names the site running a stale bundle.
+  const sanitized = event.properties
     ? sanitizeProperties(event.properties, { redactQueryKeys }).properties
     : {}
+  const linking = stripLinkingHints(sanitized, input.attributedRevenue)
+  if (linking.dropped.length > 0) {
+    deps.metrics.increment(COLLECTOR_METRICS.linkingHintFiltered, { site_id: config.siteId })
+  }
+  const properties = linking.properties
 
   const userId =
     event.type === 'identify'
