@@ -8,6 +8,13 @@ export {
   type TrackerConfigStore,
 } from './tracker-config.ts'
 export {
+  TRACKER_SCRIPT_CACHE_CONTROL,
+  TRACKER_SCRIPT_CONTENT_TYPE,
+  createTrackerScriptRoutes,
+  readTrackerScript,
+  type TrackerScript,
+} from './tracker-script.ts'
+export {
   createIngestConfigStore,
   createTrackerConfigStore,
   toTrackerConfig,

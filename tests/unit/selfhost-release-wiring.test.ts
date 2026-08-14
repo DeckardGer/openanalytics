@@ -416,3 +416,68 @@ describe('the Coolify variant has no empty defaults', () => {
     expect(empty, `these would boot as an empty string: ${empty.join(', ')}`).toEqual([])
   })
 })
+
+/**
+ * The browser bundle ships inside the images.
+ *
+ * It did not, from v0.3.0 to v0.3.2, and the shape of the failure is why this
+ * is four assertions rather than one. `tracker-build` is this Dockerfile's
+ * `build` stage; that stage did not carry `scripts/`; and `pnpm run
+ * tracker:build` is `node scripts/build-tracker.mjs`. The stock compose hid it
+ * by bind-mounting the directory from a checkout and passing an explicit
+ * command. A one-click platform install has neither, so the container inherited
+ * the stage's bare `node`, read EOF from a closed stdin, **exited 0**, and left
+ * the shared volume empty — a one-shot reporting success. Every Coolify install
+ * then served `404` for the one file a customer pastes.
+ *
+ * Three files name one path, which is the drift this pins: the build script
+ * writes it, the Dockerfile checks it, and the collector reads it.
+ */
+describe('the tracker bundle the images carry', () => {
+  const DOCKERFILE = read('infra/docker/node-app.Dockerfile')
+  const BUNDLE_PATH = 'apps/tracker/bundle/oa.js'
+
+  it('is built in the build stage, from the scripts the build stage now has', () => {
+    expect(DOCKERFILE).toMatch(/^COPY scripts \.\/scripts$/m)
+    expect(DOCKERFILE).toMatch(/^RUN pnpm run tracker:build$/m)
+  })
+
+  it('is asserted where the image is built, not where it is served', () => {
+    // A budget failure already exits non-zero and esbuild fails on a missing
+    // entry. This is the third case: a run that succeeded and wrote nothing.
+    expect(DOCKERFILE).toContain(`RUN test -s ${BUNDLE_PATH}`)
+  })
+
+  it('is built after the compile step, so scripts/ does not invalidate that layer', () => {
+    expect(DOCKERFILE.indexOf('RUN pnpm run build')).toBeLessThan(
+      DOCKERFILE.indexOf('COPY scripts ./scripts'),
+    )
+  })
+
+  it('is in the build context: scripts/ is not excluded', () => {
+    // The lesson of the v0.3.0 tag, applied to a second directory: a COPY of a
+    // source `.dockerignore` hides fails with a message that names the
+    // Dockerfile and says nothing about the ignore file that caused it.
+    const excluded = read('.dockerignore')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '' && !line.startsWith('#') && !line.startsWith('!'))
+
+    for (const rule of ['scripts', 'scripts/', '**/scripts', '**/scripts/']) {
+      expect(excluded, `${rule} would hide the tracker build script`).not.toContain(rule)
+    }
+  })
+
+  it('is written, checked and read at the same path', () => {
+    // The build script joins the segments, so it is matched segment by segment.
+    const builder = read('scripts/build-tracker.mjs')
+    expect(builder).toContain("join(ROOT, 'apps', 'tracker', 'bundle')")
+    expect(builder).toContain("join(OUT_DIR, 'oa.js')")
+
+    // The collector resolves it relative to its own module, and `src` and `dist`
+    // sit at the same depth, so one literal is right in both.
+    expect(read('apps/collector/src/tracker-script.ts')).toContain(
+      "new URL('../../tracker/bundle/oa.js', import.meta.url)",
+    )
+  })
+})

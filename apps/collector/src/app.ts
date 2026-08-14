@@ -9,6 +9,7 @@ import { createEventRoutes } from './events.ts'
 import { createHeartbeatRoutes } from './heartbeat.ts'
 import { createIngestLimiter } from './limiter.ts'
 import { createTrackerConfigRoutes, type TrackerConfigStore } from './tracker-config.ts'
+import { createTrackerScriptRoutes, type TrackerScript } from './tracker-script.ts'
 
 /**
  * Public event intake.
@@ -48,6 +49,13 @@ export interface AppDeps {
    * unauthenticated one.
    */
   readonly previewVerifyKey?: string | undefined
+  /**
+   * The browser bundle, read from the image at boot. Absent, `/oa.js` is not
+   * mounted at all — a 404 an operator can see, rather than an empty 200 that
+   * every visitor's browser would then cache for an hour. Where Caddy fronts
+   * this service it serves the file itself and this route is never reached.
+   */
+  readonly trackerScript?: TrackerScript
   /** Queue, realtime cache, policy and identity key. Absent in a config-only
    * deployment and in the M4 contract tests. */
   readonly ingest?: CollectorDeps
@@ -76,6 +84,11 @@ export function createApp(deps: AppDeps) {
    * mounting.
    */
   app.use('*', publicIngestCors())
+
+  // GET  /oa.js                 — the tracker itself, when the image carries it
+  if (deps.trackerScript) {
+    app.route('/', createTrackerScriptRoutes(deps.trackerScript))
+  }
 
   const v1 = new Hono()
 

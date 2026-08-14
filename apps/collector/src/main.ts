@@ -13,6 +13,7 @@ import type { CollectorDeps } from './deps.ts'
 import { createFallbackLimiter } from './fallback-limiter.ts'
 import { createGeoLookupFromFile } from './geoip.ts'
 import { createIngestConfigStore, createTrackerConfigStore } from './ingest-config-store.ts'
+import { readTrackerScript } from './tracker-script.ts'
 import { collectorCloudExtension } from './cloud-extension.ts'
 
 const { env, logger, service } = bootstrapService()
@@ -175,6 +176,21 @@ if (ingest === undefined) {
   })
 }
 
+// The browser bundle, read once. Where Caddy fronts this service it serves the
+// file itself and this is never reached; on a platform install there is no Caddy
+// and this is the only thing that answers the URL in every install snippet.
+const trackerScript = readTrackerScript()
+if (trackerScript === undefined) {
+  logger.warn('tracker_script_unmounted', {
+    reason: 'no bundle at apps/tracker/bundle/oa.js — run `pnpm run tracker:build`',
+  })
+} else {
+  logger.info('tracker_script_mounted', {
+    bytes: trackerScript.body.byteLength,
+    gzipped_bytes: trackerScript.gzipped.byteLength,
+  })
+}
+
 const app = createApp({
   env,
   logger,
@@ -183,6 +199,7 @@ const app = createApp({
   // request path flows into one place (ADR-0016).
   metrics,
   ...(trackerConfigStore === undefined ? {} : { trackerConfigStore }),
+  ...(trackerScript === undefined ? {} : { trackerScript }),
   ...(env.PREVIEW_TOKEN_VERIFY_KEY === undefined
     ? {}
     : { previewVerifyKey: env.PREVIEW_TOKEN_VERIFY_KEY }),
