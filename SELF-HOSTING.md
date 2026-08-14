@@ -75,7 +75,7 @@ part doing the work: a candidate publishes images under its own tag and sorts
 _above_ the release it is a candidate for, so `git tag --sort=-v:refname` lists
 `v0.1.0-rc.1` before `v0.1.0` and `git describe` would hand you the candidate.
 Dropping every tag with a `-` in it leaves only releases. To take a specific
-one, name it instead: `git checkout v0.1.1`.
+one, name it instead: `git checkout v0.2.0`.
 
 Add `--with-geoip` to that last command to download the country and city
 database in the same pass — see [GeoIP](#geoip). It is the one thing in the
@@ -103,7 +103,7 @@ them instead of compiling them. The generator has already pointed `.env` at
 them, because you checked out the tag before running it:
 
 ```sh
-grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.1.1
+grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.2.0
 docker compose pull
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
