@@ -258,11 +258,24 @@ services:
   migrate:
     image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/migrate:${OA_IMAGE_TAG:-v0.3.0}
     restart: 'no'
+    # **Required, not decoration.** This is the worker's image under another
+    # tag, so without an entrypoint of its own it boots as the worker, loads the
+    # worker's schema, and is refused by the least-privilege boundary:
+    # `CLICKHOUSE_MIGRATION_PASSWORD: must not be provided to the "worker"
+    # service`. The two CLIs are what a migration actually is.
+    entrypoint:
+      ['sh', '-c', 'node packages/postgres/dist/cli.js && node packages/clickhouse/dist/cli.js']
     environment:
       ENVIRONMENT: production
       POSTGRES_MIGRATION_URL: postgres://openanalytics:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/openanalytics
       CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_DATABASE: openanalytics
+      # `analytics`, and it cannot be anything else: `clickhouse/oa-entrypoint.sh`
+      # writes every grant against `analytics.<table>` by name rather than
+      # `analytics.*`, so a database called anything else comes up empty of
+      # privileges. The stack would go green and then fail on the first read.
+      # Note the spelling too: the migration CLI reads CLICKHOUSE_DATABASE while
+      # the worker and the gateway read CLICKHOUSE_DB.
+      CLICKHOUSE_DATABASE: analytics
       CLICKHOUSE_MIGRATION_USER: oa_migration
       CLICKHOUSE_MIGRATION_PASSWORD: ${SERVICE_PASSWORD_CHMIGRATE}
     depends_on:
@@ -295,7 +308,7 @@ services:
       LOG_LEVEL: info
       PORT: 8081
       CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_DB: openanalytics
+      CLICKHOUSE_DB: analytics
       CLICKHOUSE_READ_USER: oa_read
       CLICKHOUSE_READ_PASSWORD: ${SERVICE_PASSWORD_CHREAD}
       REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
@@ -331,7 +344,7 @@ services:
       APP_BASE_URL: ${SERVICE_URL_WEB}
       COLLECTOR_BASE_URL: ${SERVICE_URL_COLLECTOR}
       AUTH_TRUSTED_ORIGINS: ${SERVICE_URL_WEB}
-      PRODUCT_NAME: OpenAnalytics
+      PRODUCT_NAME: Open Analytics
       AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
       TRIAL_IDENTITY_SECRET: ${SERVICE_BASE64_64_TRIALIDENTITY}
       CREDENTIAL_SOURCE_SECRET: ${SERVICE_BASE64_64_CREDENTIALSOURCE}
@@ -431,7 +444,7 @@ services:
       EVENT_STREAM_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYQUEUE}@valkey-queue:6379
       REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
       CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_DB: openanalytics
+      CLICKHOUSE_DB: analytics
       CLICKHOUSE_INGEST_USER: oa_ingest
       CLICKHOUSE_INGEST_PASSWORD: ${SERVICE_PASSWORD_CHINGEST}
       CLICKHOUSE_MAINTENANCE_USER: oa_maintenance
@@ -439,7 +452,7 @@ services:
       ANONYMOUS_IDENTITY_SECRET: ${SERVICE_BASE64_64_ANONIDENTITY}
       ANONYMOUS_IDENTITY_KEY_VERSION: 1
       OA_CREDENTIAL_KEYRING: '{"active":"k1","keys":{"k1":"${SERVICE_BASE64_KEYRING}"}}'
-      PRODUCT_NAME: OpenAnalytics
+      PRODUCT_NAME: Open Analytics
       EMAIL_FROM: ${OA_EMAIL_FROM:-}
     healthcheck: *node-healthcheck
     depends_on:

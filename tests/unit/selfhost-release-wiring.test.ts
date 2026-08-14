@@ -326,3 +326,71 @@ describe('what the self-host Dockerfiles copy', () => {
     }
   })
 })
+
+/**
+ * The Coolify variant declares inline what the stock compose file reads from
+ * `env/*.env`, so the two can disagree silently.
+ *
+ * Both ways it went wrong on the first live deploy, and neither was visible in
+ * a file anyone read twice:
+ *
+ *  - `CLICKHOUSE_DATABASE` was `openanalytics`. Every grant in
+ *    `clickhouse/oa-entrypoint.sh` is written against `analytics.<table>` by
+ *    name, so the stack came up green and would have failed on the first read
+ *    with a permission error naming a table nobody had renamed.
+ *  - `PRODUCT_NAME` was `OpenAnalytics`, which is the repository, not the
+ *    product. It reaches customers, in mail.
+ *
+ * Keys the templates comment out are not required: a commented `GEOIP_DB_PATH`
+ * is a feature that is off, and this variant is entitled to leave it off.
+ */
+describe('the Coolify variant against the env templates', () => {
+  const COOLIFY = read('infra/selfhost/docker-compose.coolify.yml')
+
+  /** `  api:` at two-space indent starts a service; anything less ends one. */
+  function environmentOf(service: string): Map<string, string> {
+    const block = new RegExp(
+      `\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  [a-z][a-z0-9-]*:\\n|\\n[a-z]+:\\n|$)`,
+    )
+    const body = block.exec(COOLIFY)?.[1] ?? ''
+    const env = /\n    environment:\n([\s\S]*?)(?=\n    [a-z]|\n  [a-z]|$)/.exec(body)?.[1] ?? ''
+    const found = new Map<string, string>()
+    for (const line of env.split('\n')) {
+      const match = /^\s+([A-Z][A-Z0-9_]*):\s?(.*)$/.exec(line)
+      if (match?.[1] !== undefined) found.set(match[1], (match[2] ?? '').trim())
+    }
+    return found
+  }
+
+  /** The uncommented `KEY=value` lines of a template. */
+  function templateOf(service: string): Map<string, string> {
+    const found = new Map<string, string>()
+    for (const line of read(`infra/selfhost/env/${service}.env.example`).split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed === '' || trimmed.startsWith('#')) continue
+      const at = trimmed.indexOf('=')
+      if (at > 0) found.set(trimmed.slice(0, at), trimmed.slice(at + 1))
+    }
+    return found
+  }
+
+  for (const service of ['api', 'collector', 'worker', 'realtime', 'gateway', 'migrate', 'web']) {
+    it(`declares everything ${service}.env.example does`, () => {
+      const declared = environmentOf(service)
+      const wanted = templateOf(service)
+      expect(wanted.size).toBeGreaterThan(0)
+
+      for (const [key, value] of wanted) {
+        expect(declared.has(key), `${service} is missing ${key}`).toBe(true)
+
+        // Only literals are comparable. A template placeholder and a
+        // `${SERVICE_PASSWORD_*}` are the same intent spelled for two different
+        // machines, and neither is a value.
+        const mine = declared.get(key) ?? ''
+        if (!value.includes('{{') && !mine.includes('$')) {
+          expect(mine, `${service}.${key} disagrees with its template`).toBe(value)
+        }
+      }
+    })
+  }
+})
