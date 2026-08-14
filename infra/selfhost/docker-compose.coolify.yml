@@ -358,6 +358,16 @@ services:
       PREVIEW_TOKEN_SIGNING_KEY_FILE: /keys/preview.private.pem
     volumes:
       - keys-api:/keys:ro
+    # Traefik picks a container's port from the ports it exposes, and the six
+    # backend services share a Dockerfile that declares none. Without this the
+    # proxy has nowhere to send the request, so the router is dropped and its
+    # certificate is never even requested: no error anywhere, just a hostname
+    # that does not answer. Measured on Coolify 4.3.2 against the collector.
+    #
+    # `expose:` publishes nothing to the host. It is metadata, and it is the
+    # metadata every one of these platforms reads.
+    expose:
+      - '8082'
     labels: *client-identity-labels
     healthcheck: *node-healthcheck
     depends_on:
@@ -406,6 +416,16 @@ services:
       # `docker cp <file> <collector>:/geoip/` fills it, and SELF-HOSTING.md
       # says so under GeoIP.
       - geoip:/geoip
+    # Traefik picks a container's port from the ports it exposes, and the six
+    # backend services share a Dockerfile that declares none. Without this the
+    # proxy has nowhere to send the request, so the router is dropped and its
+    # certificate is never even requested: no error anywhere, just a hostname
+    # that does not answer. Measured on Coolify 4.3.2 against the collector.
+    #
+    # `expose:` publishes nothing to the host. It is metadata, and it is the
+    # metadata every one of these platforms reads.
+    expose:
+      - '8083'
     labels: *client-identity-labels
     healthcheck: *node-healthcheck
     depends_on:
@@ -430,6 +450,16 @@ services:
       REALTIME_TOKEN_VERIFY_KEY_FILE: /keys/realtime.public.pem
     volumes:
       - keys-realtime:/keys:ro
+    # Traefik picks a container's port from the ports it exposes, and the six
+    # backend services share a Dockerfile that declares none. Without this the
+    # proxy has nowhere to send the request, so the router is dropped and its
+    # certificate is never even requested: no error anywhere, just a hostname
+    # that does not answer. Measured on Coolify 4.3.2 against the collector.
+    #
+    # `expose:` publishes nothing to the host. It is metadata, and it is the
+    # metadata every one of these platforms reads.
+    expose:
+      - '8084'
     labels: *client-identity-labels
     healthcheck: *node-healthcheck
     depends_on:
@@ -483,6 +513,16 @@ services:
       NEXT_PUBLIC_API_URL: ${SERVICE_URL_API}
       NEXT_PUBLIC_REALTIME_URL: ${SERVICE_URL_REALTIME}
       NEXT_PUBLIC_COLLECTOR_URL: ${SERVICE_URL_COLLECTOR}
+    # Traefik picks a container's port from the ports it exposes, and the six
+    # backend services share a Dockerfile that declares none. Without this the
+    # proxy has nowhere to send the request, so the router is dropped and its
+    # certificate is never even requested: no error anywhere, just a hostname
+    # that does not answer. Measured on Coolify 4.3.2 against the collector.
+    #
+    # `expose:` publishes nothing to the host. It is metadata, and it is the
+    # metadata every one of these platforms reads.
+    expose:
+      - '3000'
     labels: *client-identity-labels
     # Its own, not the shared `*node-healthcheck`: that one asks for `/health`,
     # which the six services answer and the dashboard does not. A Next.js app
