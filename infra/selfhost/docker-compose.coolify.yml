@@ -491,7 +491,16 @@ services:
       ANONYMOUS_IDENTITY_KEY_VERSION: 1
       OA_CREDENTIAL_KEYRING: '{"active":"k1","keys":{"k1":"${SERVICE_BASE64_KEYRING}"}}'
       PRODUCT_NAME: Open Analytics
-      EMAIL_FROM: ${OA_EMAIL_FROM:-}
+      # A default that boots, because an empty one does not: the schema wants at
+      # least three characters and the worker refuses to start without them,
+      # which on a first deploy is a crash loop caused by a variable nothing
+      # told the operator was required. `env/worker.env.example` has always
+      # shipped a placeholder here for the same reason.
+      #
+      # It is only a from-address, and nothing sends until a transport is
+      # configured under Account then Deployment, so a placeholder costs nothing
+      # and is replaced in the same sitting as the transport.
+      EMAIL_FROM: ${OA_EMAIL_FROM:-Open Analytics <analytics@analytics.example>}
     healthcheck: *node-healthcheck
     depends_on:
       migrate: { condition: service_completed_successfully }

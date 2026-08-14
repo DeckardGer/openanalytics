@@ -394,3 +394,25 @@ describe('the Coolify variant against the env templates', () => {
     })
   }
 })
+
+/**
+ * An empty default is not a default.
+ *
+ * `EMAIL_FROM: ${OA_EMAIL_FROM:-}` shipped in the Coolify variant and made a
+ * first deploy impossible: the schema wants at least three characters, so the
+ * worker refused to start, restarted, and refused again, over a variable nothing
+ * told the operator was required. The stock `env/worker.env.example` had a
+ * placeholder there the whole time.
+ *
+ * Every `${VAR:-}` in that file is the same trap, so none of them is allowed.
+ * A variable the platform fills in (`SERVICE_PASSWORD_*`, `SERVICE_FQDN_*`) is
+ * written without a default at all, which is the honest spelling: it is not
+ * optional, and the platform supplies it.
+ */
+describe('the Coolify variant has no empty defaults', () => {
+  it('never writes ${VAR:-}', () => {
+    const file = read('infra/selfhost/docker-compose.coolify.yml')
+    const empty = [...file.matchAll(/\$\{([A-Z0-9_]+):-\}/g)].map((m) => m[1])
+    expect(empty, `these would boot as an empty string: ${empty.join(', ')}`).toEqual([])
+  })
+})
