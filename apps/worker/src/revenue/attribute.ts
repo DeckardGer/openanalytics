@@ -28,6 +28,7 @@ import {
   readOldestChangedRevenueObjectOccurrence,
   readOldestRevenueAttributionWatermark,
   readRevenueMatchHintsByOrder,
+  readSiteIngestSettings,
   releaseRevenueAttributionSite,
   type Database,
   type RevenueMatchHintRow,
@@ -107,6 +108,18 @@ import { revenueRecomputeChunk, revenueRollupRange, rollUpRevenueSite } from './
  * overdue — which the finalizer's bound makes impossible. Accepted, and the
  * alternative (never letting the floor advance) would mean re-reading a site's
  * entire revenue history 96 times a day forever.
+ *
+ * ============================================================================
+ * THE SITE'S OWN SWITCH — attribution is opt-in, the money is not
+ * ============================================================================
+ *
+ * A site with `attributed_revenue` off is rolled up and never attributed. The
+ * check is one line in `attributeSite`, deliberately above every
+ * attribution-only read and below the rollup closure, and the reasoning is with
+ * it. In one sentence: the switch means "is this visitor linked to this
+ * payment", so it has to be enforced where the linking happens, and two of D6's
+ * three signals never pass through the collector where the browser half of the
+ * rule lives.
  *
  * ============================================================================
  * Failure isolation and shutdown
@@ -486,6 +499,50 @@ export async function attributeSite(
       // advanced", so an empty horizon is a run — otherwise the counter would
       // quietly stop on a site that has simply gone quiet, and a rate alarm on
       // it could not tell that apart from the loop having died.
+      deps.metrics.increment(WORKER_METRICS.revenueAttributionRuns)
+      return { status: 'ok', rows: 0, matchedVia: NO_MATCHES }
+    }
+
+    // --- The site's own switch (ADR-0064 D4a, extended) --------------------
+    //
+    // `attributed_revenue` decides whether this site is attributed AT ALL, not
+    // merely what its browsers send. D6 has three matching signals and only the
+    // first one passes through the collector, so the ingest rule that strips
+    // `order_id` cannot reach the other two: `client_reference_id` and
+    // `metadata.oa_external_id` travel from the site's own server to Stripe and
+    // reach us on the webhook. A site that had switched linking off would still
+    // have watched journeys appear — the setting would have been describing the
+    // browser rather than the product.
+    //
+    // ONE decision, here, rather than three signal-level suppressions: the
+    // planner keeps knowing nothing about site settings, and there is no path
+    // that quietly acquires a fourth signal without passing this line (the same
+    // reason `mayCollect()` is a single gate in the tracker).
+    //
+    // Placed AFTER the rollup closure and BEFORE every attribution-only read.
+    // The buckets are money, not journeys: totals, per-day and per-hour revenue
+    // are outside this switch by decision (ADR-0064 D4) and must keep moving for
+    // a site with linking off, so this path still rolls up and still advances the
+    // watermark. What stops is the linking half — the hints, the conversion
+    // signals, the touchpoints and the write.
+    //
+    // Forward-only: stored `revenue_attributions` rows are left exactly as they
+    // are. Turning the switch off is not a deletion request, and rewriting
+    // history on a settings change is the one thing this system never does
+    // (ADR-0063 (f)).
+    const settings = await readSiteIngestSettings(deps.db, siteId)
+    if (settings?.settings.attributedRevenue !== true) {
+      // Never silent. "Why is this site not attributed?" has to be answerable
+      // from the metric rather than from reading this function.
+      deps.metrics.increment(WORKER_METRICS.revenueAttributionSkipped, {
+        reason: 'attribution_off',
+      })
+      deps.logger.info('revenue_attribution_skipped_flag', {
+        site_id: siteId,
+        charges: chargeFacts.length,
+      })
+      await runRollup()
+      await advance(deps, siteId, nowMs)
       deps.metrics.increment(WORKER_METRICS.revenueAttributionRuns)
       return { status: 'ok', rows: 0, matchedVia: NO_MATCHES }
     }

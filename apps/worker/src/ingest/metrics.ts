@@ -311,7 +311,18 @@ export const WORKER_METRICS = {
    * counter that stopped for it could not be told apart from a loop that died.
    */
   revenueAttributionRuns: 'worker_revenue_attribution_runs',
-  /** A site skipped: another worker held its lease, or the lifecycle fence refused it. */
+  /**
+   * A site whose attribution did not run, labelled `reason`: `leased` (another
+   * worker holds it), `lifecycle` (the deletion fence refused it), or
+   * `attribution_off` — the site's own `attributed_revenue` switch is off, so no
+   * journey is computed from any of D6's three signals (ADR-0064 D4a).
+   *
+   * `attribution_off` is the one reason that still rolls up and still advances
+   * the watermark: money totals are outside that switch, so the run is a run.
+   * A sustained rate here is the answer to "why does this site show revenue but
+   * no journeys", and its absence is the answer to "why does a site that turned
+   * linking off still have them" — an old row, not a new one.
+   */
   revenueAttributionSkipped: 'worker_revenue_attribution_skipped',
   /**
    * A run that threw and released without advancing, labelled `reason`

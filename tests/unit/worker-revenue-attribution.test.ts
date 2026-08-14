@@ -1,5 +1,5 @@
-import type { IdentityKey } from '@openanalytics/domain'
-import { NOOP_METRICS } from '@openanalytics/observability'
+import { externalUserIdHash, type IdentityKey } from '@openanalytics/domain'
+import { NOOP_METRICS, createRecordingMetrics } from '@openanalytics/observability'
 import type * as PostgresModule from '@openanalytics/postgres'
 import type { Database, RevenueMatchHintRow } from '@openanalytics/postgres'
 import { createCapturedLogger } from '@openanalytics/testkit'
@@ -42,6 +42,8 @@ const advanceRecomputeMock = vi.fn()
 const markRecomputeMock = vi.fn()
 const projectedMock = vi.fn()
 const oldestChangedObjectMock = vi.fn()
+/** The site's own `attributed_revenue` switch (ADR-0064 D4a). */
+const ingestSettingsMock = vi.fn()
 
 vi.mock('@openanalytics/postgres', async (importOriginal) => {
   const actual = await importOriginal<typeof PostgresModule>()
@@ -57,6 +59,7 @@ vi.mock('@openanalytics/postgres', async (importOriginal) => {
     advanceRevenueRollupRecompute: (...args: unknown[]) => advanceRecomputeMock(...args),
     markRevenueRollupRecompute: (...args: unknown[]) => markRecomputeMock(...args),
     isSiteFullyProjected: (...args: unknown[]) => projectedMock(...args),
+    readSiteIngestSettings: (...args: unknown[]) => ingestSettingsMock(...args),
     readOldestChangedRevenueObjectOccurrence: (...args: unknown[]) =>
       oldestChangedObjectMock(...args),
   }
@@ -82,6 +85,8 @@ interface Recorded {
   readonly rollupReads: { siteId: string; unit: string; loMs: number; hiMs: number }[]
   readonly rollupWrites: { unit: string; rows: number }[]
   readonly rollupGenerations: number[]
+  /** Signal-1 reads, so "no attribution work happened" is checkable. */
+  conversionReads: number
 }
 
 interface FakeCharge {
@@ -106,6 +111,8 @@ function fakes(
     failInsertFor?: string
     /** Non-charge object kinds in the window, for the CP7 defect-2 case. */
     extraFacts?: Record<string, ('refund' | 'dispute')[]>
+    /** Session facts the touchpoint read answers with, for the hash-join signals. */
+    sessions?: { sessionId: string; sessionStartMs: number; userId: string }[]
   } = {},
 ) {
   const recorded: Recorded = {
@@ -115,6 +122,7 @@ function fakes(
     rollupReads: [],
     rollupWrites: [],
     rollupGenerations: [],
+    conversionReads: 0,
   }
 
   const facts = {
@@ -189,14 +197,29 @@ function fakes(
       return { token: 'tok' }
     },
     readStoredAttributions: async () => [],
-    readConversionSignals: async () => options.conversions ?? [],
+    readConversionSignals: async () => {
+      recorded.conversionReads += 1
+      return options.conversions ?? []
+    },
     async readSessionTouchpoints(input: { siteId: string; fromMs: number; toMs: number }) {
       recorded.touchpointReads.push({
         siteId: input.siteId,
         fromMs: input.fromMs,
         toMs: input.toMs,
       })
-      return []
+      return (options.sessions ?? []).map((session) => ({
+        sessionId: session.sessionId,
+        sessionStartMs: session.sessionStartMs,
+        userId: session.userId,
+        anonymousId: '',
+        referrerDomain: 'google.com',
+        utmSource: '',
+        utmMedium: '',
+        utmCampaign: '',
+        utmContent: '',
+        utmTerm: '',
+        entryPagePath: '/pricing',
+      }))
     },
     ping: async () => true,
     close: async () => {},
@@ -250,8 +273,14 @@ function deps(overrides: Record<string, unknown> = {}) {
   }
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
+/**
+ * The ordinary state of every mocked repository call.
+ *
+ * A named function rather than only a `beforeEach` body because one case below
+ * runs the same site twice with the switch in both positions, and the second run
+ * needs the defaults back after `vi.clearAllMocks()`.
+ */
+function resetDefaultMocks(): void {
   claimMock.mockImplementation(async (_db: unknown, input: { siteId: string }) => ({
     computedThrough: new Date(NOW - 60_000),
     runSeq: 1,
@@ -272,6 +301,17 @@ beforeEach(() => {
   oldestChangedMock.mockResolvedValue(null)
   oldestWatermarkMock.mockResolvedValue(new Date(NOW - 60_000))
   hintsMock.mockResolvedValue(new Map<string, RevenueMatchHintRow>())
+  // Attribution on, which is the state every case below except the switch's own
+  // assumes. The column defaults to `false`, so this is the site that chose it.
+  ingestSettingsMock.mockResolvedValue({
+    configVersion: 3,
+    settings: { attributedRevenue: true },
+  })
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  resetDefaultMocks()
 })
 
 describe('per-site failure isolation (the CP3 lesson)', () => {
@@ -752,5 +792,149 @@ describe('shutdown', () => {
     // The site that DID run reached a decided state — nothing is lost by
     // cutting here.
     expect(advanceMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the site's own switch (ADR-0064 D4a, extended)", () => {
+  /**
+   * `attributed_revenue` decides whether a site is attributed at all.
+   *
+   * The tracker and the collector already enforce it on D6's **first** signal,
+   * the browser's `order_id`. The other two — a checkout `client_reference_id`
+   * and an identity carried on the Stripe object — travel from the site's own
+   * server to the provider and reach us on the webhook, so no ingest rule can
+   * see them and a site with the switch off used to be attributed through them
+   * anyway. Both are set up here, so the assertion is about the signals that
+   * actually escaped rather than about the one already closed.
+   */
+  const HOUR = 3_600_000
+
+  /** What the job derives from a hint's `client_reference_id`, derived the same way. */
+  const clientReferenceHash = externalUserIdHash({
+    siteId: SITE_A,
+    externalUserId: 'cust_42',
+    key: KEY,
+  }).userId
+
+  const withBothServerSignals = () => {
+    hintsMock.mockResolvedValue(
+      new Map<string, RevenueMatchHintRow>([
+        [
+          'pi_2',
+          {
+            siteId: SITE_A,
+            provider: 'stripe',
+            orderId: 'pi_2',
+            checkoutSessionId: 'cs_2',
+            clientReferenceId: 'cust_42',
+          } as unknown as RevenueMatchHintRow,
+        ],
+      ]),
+    )
+    return fakes({
+      charges: {
+        [SITE_A]: [
+          // Signal 3: the identity the projection put on the charge itself.
+          { objectId: 'ch_1', orderId: 'pi_1', externalUserHash: 'hash-visitor-1' },
+          // Signal 2: nothing on the fact; the hint above carries the reference.
+          { objectId: 'ch_2', orderId: 'pi_2' },
+        ],
+      },
+      sessions: [
+        { sessionId: 's_1', sessionStartMs: CHARGE_AT - HOUR, userId: 'hash-visitor-1' },
+        { sessionId: 's_2', sessionStartMs: CHARGE_AT - HOUR, userId: clientReferenceHash },
+      ],
+    })
+  }
+
+  it('attributes both server-side signals when the site turned the switch on', async () => {
+    // The positive control, and it comes first deliberately: the absence
+    // asserted below proves nothing unless this data attributes without it.
+    const built = withBothServerSignals()
+    const context = deps({ _fakes: built })
+
+    const result = await attributeRevenueOnce(
+      context.deps as unknown as Parameters<typeof attributeRevenueOnce>[0],
+    )
+
+    expect(result.matchedVia.client_reference).toBe(2)
+    expect(built.recorded.inserted.map((row) => row.objectId).sort()).toEqual(['ch_1', 'ch_2'])
+  })
+
+  it('writes no attribution at all when the switch is off, with the two signals present', async () => {
+    ingestSettingsMock.mockResolvedValue({
+      configVersion: 3,
+      settings: { attributedRevenue: false },
+    })
+    const built = withBothServerSignals()
+    const metrics = createRecordingMetrics()
+    const context = deps({ _fakes: built, metrics })
+
+    const result = await attributeRevenueOnce(
+      context.deps as unknown as Parameters<typeof attributeRevenueOnce>[0],
+    )
+
+    // Nothing written, and nothing even read: the decision is above the reads,
+    // so a site with linking off does not pay for the joins either.
+    expect(built.recorded.inserted).toEqual([])
+    expect(built.recorded.touchpointReads).toEqual([])
+    expect(built.recorded.conversionReads).toBe(0)
+    expect(hintsMock).not.toHaveBeenCalled()
+    expect(result.matchedVia).toEqual({
+      conversion_event: 0,
+      client_reference: 0,
+      customer_identity: 0,
+      none: 0,
+    })
+
+    // Never silent: the reason is in the metric and in the log.
+    expect(metrics.countOf('worker_revenue_attribution_skipped')).toBe(1)
+    expect(
+      metrics.recorded.find((entry) => entry.name === 'worker_revenue_attribution_skipped')?.labels,
+    ).toMatchObject({ reason: 'attribution_off' })
+    expect(
+      context.logger.lines.some((line) => line['msg'] === 'revenue_attribution_skipped_flag'),
+    ).toBe(true)
+  })
+
+  it('leaves the money alone: the same buckets are written either way', async () => {
+    // ADR-0064 D4. Revenue totals are measurement and are outside this switch,
+    // so the rollup step and the watermark both still run — otherwise turning
+    // linking off would quietly freeze a site's revenue chart.
+    const on = withBothServerSignals()
+    await attributeRevenueOnce(
+      deps({ _fakes: on }).deps as unknown as Parameters<typeof attributeRevenueOnce>[0],
+    )
+    const advancesWithAttribution = advanceMock.mock.calls.length
+
+    vi.clearAllMocks()
+    resetDefaultMocks()
+    ingestSettingsMock.mockResolvedValue({
+      configVersion: 3,
+      settings: { attributedRevenue: false },
+    })
+    const off = withBothServerSignals()
+    await attributeRevenueOnce(
+      deps({ _fakes: off }).deps as unknown as Parameters<typeof attributeRevenueOnce>[0],
+    )
+
+    expect(off.recorded.rollupWrites).toEqual(on.recorded.rollupWrites)
+    expect(off.recorded.rollupGenerations).toEqual(on.recorded.rollupGenerations)
+    expect(off.recorded.factReads).toEqual(on.recorded.factReads)
+    expect(advanceMock.mock.calls.length).toBe(advancesWithAttribution)
+  })
+
+  it('does not attribute a site whose settings row cannot be read', async () => {
+    // A site that has vanished under the run answers `null`. The conservative
+    // direction is the same one the column's default takes: no linking.
+    ingestSettingsMock.mockResolvedValue(null)
+    const built = withBothServerSignals()
+    const context = deps({ _fakes: built })
+
+    await attributeRevenueOnce(
+      context.deps as unknown as Parameters<typeof attributeRevenueOnce>[0],
+    )
+
+    expect(built.recorded.inserted).toEqual([])
   })
 })

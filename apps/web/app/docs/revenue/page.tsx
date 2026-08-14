@@ -32,11 +32,23 @@ export default function RevenueDocsPage() {
           <strong>Attributed revenue</strong> on when connecting Stripe — until
           you do, the script sends no <Code>order_id</Code> at all and the
           conversion is just a count — and the linking itself carries a consent
-          obligation you meet as the controller of your site. The switch is
-          enforced on both sides: an <Code>order_id</Code> that arrives while it
-          is off, from a cached copy of the script or a request you wrote
-          yourself, is dropped from the event before it is stored. The
-          conversion is still counted.
+          obligation you meet as the controller of your site.
+        </p>
+        <p>
+          The switch decides whether the link happens at all, not just what the
+          script sends. An <Code>order_id</Code> that reaches us while it is off,
+          from a cached copy of the script or a request you wrote yourself, is
+          dropped before the event is stored; and the matcher skips your site
+          entirely, so a payment is not linked through your own Stripe
+          integration either (a <Code>client_reference_id</Code>, an id on the
+          customer). Conversions are still counted and revenue totals are
+          unaffected — what stops is the journey.
+        </p>
+        <p>
+          Switching it off leaves the journeys you already have; it stops new
+          ones. Switching it back on picks up roughly the last month of payments
+          on the next pass — that is how far back the matcher re-reads — and
+          older ones stay as they are.
         </p>
         <DocCode caption="wherever you record the visitor's choice">{`oa.consent("granted"); // or "denied", which stops collection entirely`}</DocCode>
         <p>
