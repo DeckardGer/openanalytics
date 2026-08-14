@@ -484,7 +484,24 @@ services:
       NEXT_PUBLIC_REALTIME_URL: ${SERVICE_URL_REALTIME}
       NEXT_PUBLIC_COLLECTOR_URL: ${SERVICE_URL_COLLECTOR}
     labels: *client-identity-labels
-    healthcheck: *node-healthcheck
+    # Its own, not the shared `*node-healthcheck`: that one asks for `/health`,
+    # which the six services answer and the dashboard does not. A Next.js app
+    # has the routes it has, so it answers `404` there forever, the container
+    # never turns healthy, and the proxy serves "no available server" in front
+    # of a dashboard that was ready in 283ms. `/login` is the honest probe: it
+    # renders without a session, so a `200` means the app is serving.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     depends_on:
       api: { condition: service_healthy }
     mem_limit: 512m
