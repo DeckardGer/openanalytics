@@ -1,0 +1,451 @@
+# OpenAnalytics on Coolify, Dokploy, CapRover and anything else that owns the
+# proxy and hands you one env sheet.
+#
+# NOT an overlay. This is a whole compose file, used INSTEAD of
+# `docker-compose.yml`, because the differences are removals rather than
+# additions and an overlay cannot remove. Point the platform at this repository,
+# set the base directory to `infra/selfhost`, and name this file.
+#
+# ## What is different, and why each one had to change
+#
+# 1. **No `env_file:`.** The twelve `env/*.env` files are git-ignored, so a
+#    platform that clones this repository has only the `.example` copies and
+#    compose fails on the first missing one. Every service therefore declares its
+#    variables inline. The per-service split survives that: what each service is
+#    allowed to hold is still enforced at boot by `FORBIDDEN_KEYS`, and this file
+#    is written to satisfy it rather than to work around it.
+#
+# 2. **No `networks:` block.** Coolify's own documentation is explicit that a
+#    compose file defining its own networks produces intermittent 504s, because
+#    containers end up on two networks and the proxy picks the wrong one. Losing
+#    it also loses the pinned `172.28.0.0/16` subnet and the two Valkey static
+#    addresses, which is a bonus: on a redeploy those produced
+#    `Address already in use` until the old container released them.
+#
+# 3. **No Caddy, and no `ports:`.** The platform terminates TLS on 80/443 and
+#    routes by hostname. Two proxies cannot both hold those ports.
+#
+# 4. **The Caddyfile's client-identity rules are rebuilt as Traefik labels.**
+#    This is the one removal that costs something real, and it is reinstated
+#    below rather than dropped. See the `oa-client-identity` middleware.
+#
+# 5. **The three signing pairs are generated inside the stack**, by the same
+#    `keygen` step `docker-compose.keys.yml` uses, and delivered as files. No
+#    platform can generate a keypair whose halves must match across two
+#    services; every one of them can generate a random string. So the pairs are
+#    made here and each service is handed a path.
+#
+# ## Images
+#
+# Pinned to a release tag by default. **That release must be one whose images
+# carry `*_FILE` support**, which landed after `v0.1.1`, so the first tag this file
+# can point at is the next one. Until then, set `OA_IMAGE_REPO=openanalytics`
+# and `OA_IMAGE_TAG=local` and the platform builds all eight from this
+# repository, which works and takes about fifteen minutes on a small host.
+
+x-node-healthcheck: &node-healthcheck
+  test:
+    [
+      'CMD',
+      'node',
+      '-e',
+      "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+    ]
+  interval: 15s
+  timeout: 5s
+  retries: 10
+  start_period: 30s
+
+# The header rules `Caddyfile:56-64` applies, as a Traefik middleware.
+#
+# NOT cosmetic, and not TLS. `apps/collector/src/client-identity.ts` reads the
+# visitor's address from a small list of headers a fronting proxy is supposed to
+# own, and its own comment says the list is safe "only while the fronting proxy
+# removes what it does not itself set". Traefik overwrites `X-Forwarded-For` and
+# `X-Real-Ip` from the connection on its own, but it does not touch
+# `CF-Connecting-IP` and friends, because they are nobody's standard.
+#
+# Without these lines any visitor can send `cf-connecting-ip` and pick their own
+# rate-limit bucket, or send `cf-ipcountry` and write their own country into
+# somebody's analytics. An empty value is how Traefik deletes a header.
+#
+# **`coolify.traefik.middlewares` is the attachment, and it is not optional.**
+# Coolify names the routers it generates `https-N-<uuid>-<service>` and renames
+# them on every redeploy, so a hand-written `traefik.http.routers.<name>.
+# middlewares` label attaches this to a router that does not exist, and it fails
+# the worst way available: silently, leaving the headers through. That label is
+# Coolify's own directive, consumed at deploy time and appended to whichever
+# router it generated.
+#
+# List syntax rather than a mapping, because that is the form their
+# documentation gives and label handling in compose deployments is a part of
+# Coolify with a history of edge cases. The whole list is aliased onto the four
+# public services; Traefik takes one definition of a middleware and the repeats
+# are identical, so defining it more than once costs nothing.
+x-client-identity-labels: &client-identity-labels
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.Fly-Client-IP='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.CF-Connecting-IP='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.True-Client-IP='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.X-Vercel-IP-Country='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.X-Vercel-IP-City='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.Fly-Client-Country='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.CF-IPCountry='
+  - 'traefik.http.middlewares.oa-client-identity.headers.customRequestHeaders.CF-IPCity='
+  - 'coolify.traefik.middlewares=oa-client-identity'
+
+services:
+  # --- stores ---------------------------------------------------------------
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openanalytics
+      POSTGRES_DB: openanalytics
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3.17.56
+    restart: unless-stopped
+    # The four users and their grants are rendered at every start by this
+    # script. Nothing else creates them.
+    entrypoint: ['bash', '/usr/local/bin/oa-entrypoint.sh']
+    environment:
+      CLICKHOUSE_INGEST_PASSWORD: ${SERVICE_PASSWORD_CHINGEST}
+      CLICKHOUSE_READ_PASSWORD: ${SERVICE_PASSWORD_CHREAD}
+      CLICKHOUSE_MAINTENANCE_PASSWORD: ${SERVICE_PASSWORD_CHMAINT}
+      CLICKHOUSE_MIGRATION_PASSWORD: ${SERVICE_PASSWORD_CHMIGRATE}
+    volumes:
+      - ch-data:/var/lib/clickhouse
+      - ./clickhouse/config.d/openanalytics.xml:/etc/clickhouse-server/config.d/openanalytics.xml:ro
+      - ./clickhouse/oa-entrypoint.sh:/usr/local/bin/oa-entrypoint.sh:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ['CMD', 'clickhouse-client', '--query', 'SELECT 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # The durable event queue. Between the collector's 202 and the worker's
+  # insert this instance holds the only copy of an event.
+  valkey-queue:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    entrypoint: ['sh', '/usr/local/bin/oa-valkey-entrypoint.sh']
+    environment:
+      VALKEY_PASSWORD: ${SERVICE_PASSWORD_VALKEYQUEUE}
+    volumes:
+      - valkey-queue-data:/data
+      - ./valkey/valkey-queue.conf:/usr/local/etc/valkey/valkey.conf:ro
+      - ./valkey/valkey-entrypoint.sh:/usr/local/bin/oa-valkey-entrypoint.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1536m
+
+  # Presence, rate-limit counters, short-lived caches. Losable by design.
+  valkey-realtime:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    entrypoint: ['sh', '/usr/local/bin/oa-valkey-entrypoint.sh']
+    environment:
+      VALKEY_PASSWORD: ${SERVICE_PASSWORD_VALKEYREALTIME}
+    volumes:
+      - valkey-realtime-data:/data
+      - ./valkey/valkey-realtime.conf:/usr/local/etc/valkey/valkey.conf:ro
+      - ./valkey/valkey-entrypoint.sh:/usr/local/bin/oa-valkey-entrypoint.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 768m
+
+  # --- one-shot: the three signing pairs ------------------------------------
+  #
+  # Lifted from `docker-compose.keys.yml`, which is the tested original. Four
+  # separate volumes rather than one, so the split between the api's private
+  # halves and each verifier's public half is a filesystem fact and not a
+  # convention: a single shared volume would put every private half one `cat`
+  # away from every service that only verifies.
+  #
+  # Idempotent, and that is load-bearing here more than anywhere: these
+  # platforms re-run the whole stack on every redeploy, and regenerating would
+  # rotate all three pairs behind everyone's back. Each half is written only
+  # when missing, and a missing public half is derived from the private one, so
+  # an interrupted volume repairs itself.
+  #
+  # EVERY LITERAL DOLLAR IS DOUBLED. Compose substitutes dollar-variables before
+  # the container sees the command, so a single-dollar `$pair` would arrive as an
+  # empty string and this would write `/keys/api/.private.pem` three times.
+  keygen:
+    image: alpine:3.21
+    restart: 'no'
+    command:
+      - sh
+      - -ec
+      - |
+        apk add --no-cache openssl >/dev/null
+        mkdir -p /keys/api /keys/gateway /keys/realtime /keys/collector
+        for entry in "query gateway" "realtime realtime" "preview collector"; do
+          set -- $$entry
+          pair=$$1
+          dest=$$2
+          if [ ! -f "/keys/api/$$pair.private.pem" ]; then
+            openssl genpkey -algorithm ed25519 -out "/keys/api/$$pair.private.pem"
+            echo "$$pair: private half generated"
+          else
+            echo "$$pair: private half exists, left alone"
+          fi
+          if [ ! -f "/keys/$$dest/$$pair.public.pem" ]; then
+            openssl pkey -in "/keys/api/$$pair.private.pem" -pubout \
+              -out "/keys/$$dest/$$pair.public.pem"
+            echo "$$pair: public half derived for $$dest"
+          fi
+        done
+        # uid 1000 is `node` in the runtime image, which is the user every
+        # service runs as.
+        chown -R 1000:1000 /keys
+        chmod 700 /keys/api /keys/gateway /keys/realtime /keys/collector
+        chmod 400 /keys/api/*.pem
+        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem /keys/collector/*.pem
+        ls -l /keys/api /keys/gateway /keys/realtime /keys/collector
+    volumes:
+      - keys-api:/keys/api
+      - keys-gateway:/keys/gateway
+      - keys-realtime:/keys/realtime
+      - keys-collector:/keys/collector
+
+  # --- one-shot: schemas ----------------------------------------------------
+  #
+  # Both stores build from empty. Re-runs are safe and are the upgrade path:
+  # both runners keep a ledger and apply only what is pending.
+  migrate:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/migrate:${OA_IMAGE_TAG:-local}
+    restart: 'no'
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_MIGRATION_URL: postgres://openanalytics:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/openanalytics
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: openanalytics
+      CLICKHOUSE_MIGRATION_USER: oa_migration
+      CLICKHOUSE_MIGRATION_PASSWORD: ${SERVICE_PASSWORD_CHMIGRATE}
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+
+  # --- one-shot: the browser tracker ----------------------------------------
+  #
+  # Compiles `oa.js` into a volume the collector serves. On the stock compose
+  # Caddy serves it; here the collector does, from the same volume.
+  tracker-build:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/tracker-build:${OA_IMAGE_TAG:-local}
+    restart: 'no'
+    volumes:
+      - tracker:/out
+
+  # --- services -------------------------------------------------------------
+
+  # The only process allowed to read ClickHouse. Holds the PUBLIC half of the
+  # query pair and nothing else; `QUERY_SIGNING_PRIVATE_KEY` is on its
+  # FORBIDDEN_KEYS list, and since the file path resolves BEFORE that check,
+  # pointing this at the api's private key fails exactly as pasting it here
+  # would.
+  gateway:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/query-gateway:${OA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      PORT: 8081
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: openanalytics
+      CLICKHOUSE_READ_USER: oa_read
+      CLICKHOUSE_READ_PASSWORD: ${SERVICE_PASSWORD_CHREAD}
+      REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
+      QUERY_SIGNING_KEY_ID: oa-selfhost-1
+      QUERY_SIGNING_PUBLIC_KEY_FILE: /keys/query.public.pem
+    volumes:
+      - keys-gateway:/keys:ro
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      keygen: { condition: service_completed_successfully }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # Control plane, and the only holder of all three private halves.
+  #
+  # Started after the gateway: the api sends a field on every gateway query that
+  # an older gateway rejects, so an api-first upgrade breaks analytics reads for
+  # the length of the window while a gateway-first one has no window at all.
+  api:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/api:${OA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      PORT: 8082
+      SERVICE_FQDN_API_8082: /
+      DATABASE_URL: postgres://openanalytics:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/openanalytics
+      REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
+      QUERY_GATEWAY_URL: http://gateway:8081
+      AUTH_BASE_URL: ${SERVICE_URL_API}
+      APP_BASE_URL: ${SERVICE_URL_WEB}
+      COLLECTOR_BASE_URL: ${SERVICE_URL_COLLECTOR}
+      AUTH_TRUSTED_ORIGINS: ${SERVICE_URL_WEB}
+      PRODUCT_NAME: OpenAnalytics
+      AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
+      TRIAL_IDENTITY_SECRET: ${SERVICE_BASE64_64_TRIALIDENTITY}
+      CREDENTIAL_SOURCE_SECRET: ${SERVICE_BASE64_64_CREDENTIALSOURCE}
+      OA_CREDENTIAL_KEYRING: '{"active":"k1","keys":{"k1":"${SERVICE_BASE64_KEYRING}"}}'
+      QUERY_SIGNING_KEY_ID: oa-selfhost-1
+      # The default is `disabled`, written for the hosted product. Every
+      # first-run screen here depends on it being on.
+      AUTH_PASSWORD_SIGNIN: enabled
+      QUERY_SIGNING_PRIVATE_KEY_FILE: /keys/query.private.pem
+      REALTIME_TOKEN_SIGNING_KEY_FILE: /keys/realtime.private.pem
+      PREVIEW_TOKEN_SIGNING_KEY_FILE: /keys/preview.private.pem
+    volumes:
+      - keys-api:/keys:ro
+    labels: *client-identity-labels
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      keygen: { condition: service_completed_successfully }
+      gateway: { condition: service_healthy }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # Ingest, and the one service that ever sees a raw visitor IP. Also serves
+  # `oa.js` from the tracker volume, which on the stock compose is Caddy's job.
+  collector:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/collector:${OA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      PORT: 8083
+      SERVICE_FQDN_COLLECTOR_8083: /
+      DATABASE_URL: postgres://openanalytics:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/openanalytics
+      EVENT_STREAM_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYQUEUE}@valkey-queue:6379
+      REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
+      ANONYMOUS_IDENTITY_SECRET: ${SERVICE_BASE64_64_ANONIDENTITY}
+      ANONYMOUS_IDENTITY_KEY_VERSION: 1
+      PREVIEW_TOKEN_VERIFY_KEY_FILE: /keys/preview.public.pem
+      # Unset means every event carries null geo, a degradation and never a
+      # failure. `infra/selfhost/geoip/fetch-dbip.sh` downloads a database.
+      GEOIP_DB_PATH: /geoip/dbip-city-lite.mmdb
+    volumes:
+      - keys-collector:/keys:ro
+      - tracker:/srv/tracker:ro
+      - ./geoip:/geoip:ro
+    labels: *client-identity-labels
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      keygen: { condition: service_completed_successfully }
+      tracker-build: { condition: service_completed_successfully }
+      valkey-queue: { condition: service_healthy }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # The SSE stream behind the live dashboard.
+  realtime:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/realtime:${OA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      PORT: 8084
+      SERVICE_FQDN_REALTIME_8084: /
+      REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
+      REALTIME_TOKEN_VERIFY_KEY_FILE: /keys/realtime.public.pem
+    volumes:
+      - keys-realtime:/keys:ro
+    labels: *client-identity-labels
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      keygen: { condition: service_completed_successfully }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 512m
+
+  # Drains the queue into ClickHouse; sessions, rollups, exports, mail,
+  # deletions. Never public.
+  worker:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/worker:${OA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      PORT: 8085
+      DATABASE_URL: postgres://openanalytics:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/openanalytics
+      EVENT_STREAM_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYQUEUE}@valkey-queue:6379
+      REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: openanalytics
+      CLICKHOUSE_INGEST_USER: oa_ingest
+      CLICKHOUSE_INGEST_PASSWORD: ${SERVICE_PASSWORD_CHINGEST}
+      CLICKHOUSE_MAINTENANCE_USER: oa_maintenance
+      CLICKHOUSE_MAINTENANCE_PASSWORD: ${SERVICE_PASSWORD_CHMAINT}
+      ANONYMOUS_IDENTITY_SECRET: ${SERVICE_BASE64_64_ANONIDENTITY}
+      ANONYMOUS_IDENTITY_KEY_VERSION: 1
+      OA_CREDENTIAL_KEYRING: '{"active":"k1","keys":{"k1":"${SERVICE_BASE64_KEYRING}"}}'
+      PRODUCT_NAME: OpenAnalytics
+      EMAIL_FROM: ${OA_EMAIL_FROM:-}
+    healthcheck: *node-healthcheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey-queue: { condition: service_healthy }
+      valkey-realtime: { condition: service_healthy }
+    mem_limit: 768m
+
+  # The dashboard. `NEXT_PUBLIC_*` is inlined into the browser bundle at BUILD
+  # time, so a pulled image carries whatever the release built. This is the one
+  # service a platform install has to build rather than pull if the three
+  # origins are not the ones baked in.
+  web:
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/web:${OA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      SERVICE_FQDN_WEB_3000: /
+      NEXT_PUBLIC_API_URL: ${SERVICE_URL_API}
+      NEXT_PUBLIC_REALTIME_URL: ${SERVICE_URL_REALTIME}
+      NEXT_PUBLIC_COLLECTOR_URL: ${SERVICE_URL_COLLECTOR}
+    labels: *client-identity-labels
+    healthcheck: *node-healthcheck
+    depends_on:
+      api: { condition: service_healthy }
+    mem_limit: 512m
+
+volumes:
+  pg-data:
+  ch-data:
+  valkey-queue-data:
+  valkey-realtime-data:
+  tracker:
+  keys-api:
+  keys-gateway:
+  keys-realtime:
+  keys-collector:
