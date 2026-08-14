@@ -47,7 +47,28 @@ function isPrivateHost(hostname: string): boolean {
   if (hostname.startsWith('10.')) return true
   if (hostname.startsWith('192.168.')) return true
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true
-  return hostname.endsWith(FLY_PRIVATE_SUFFIX)
+  if (hostname.endsWith(FLY_PRIVATE_SUFFIX)) return true
+
+  // A single label has no TLD, so no public resolver can answer it: the only
+  // thing that can is a local one, which on a container platform is the
+  // runtime's own DNS answering with an address on its bridge network. The
+  // tests above decide for an address and have no answer at all for a name, so
+  // without this line every compose service name reads as the public wire.
+  //
+  // This is what lets the one-click platforms work. They allocate their own
+  // network and let no template pin an address inside it, so a compose file
+  // written for them has nothing but the service name to dial
+  // (`infra/selfhost/docker-compose.coolify.yml`).
+  //
+  // The caveat, stated rather than hidden: a host configured with a DNS search
+  // suffix can resolve a bare label to something off the machine. That needs an
+  // operator who set a search domain and then wrote a bare label into a Valkey
+  // URL, and it is the same class of mistake as pointing the URL at a `10.x`
+  // address across a link they do not control, which this check has always
+  // allowed. Dots and colons are excluded so no address reaches here: an IPv4
+  // literal outside the ranges above is still public, and an IPv6 one is
+  // already answered.
+  return !hostname.includes('.') && !hostname.includes(':')
 }
 
 export interface ValkeyConnectionOptions {

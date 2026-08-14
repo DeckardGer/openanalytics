@@ -406,13 +406,15 @@ for the cause in the logs.
 
 The connection factory refuses a plaintext `redis://` URL whose host it cannot
 prove is private, because that hop can hold the only copy of a customer event.
-It recognises loopback, `10/8`, `192.168/16` and `172.16-31/12` — **a compose
-service name is none of those**, so `redis://valkey-queue:6379` is rejected
-outright with "this hop crosses the public internet". AUTH is required on that
-hop whatever the address.
+It recognises loopback, `10/8`, `192.168/16`, `172.16-31/12`, and a **single-label
+name** such as `valkey-queue`, which has no TLD and so no public resolver that
+can answer it. A host with a dot in it that is not one of those ranges is the
+public wire and is refused with "this hop crosses the public internet". AUTH is
+required on that hop whatever the address.
 
 So the compose network pins `172.28.0.0/16` and gives each Valkey a fixed
-address in it. If that subnet collides with something on your host, change
+address in it, which is what it did before the name rule existed and what it
+still does. If that subnet collides with something on your host, change
 `OA_SUBNET`, both `ipv4_address` values and the URLs in `env/*.env` together —
 any private range works, none of the public ones do.
 
@@ -420,9 +422,7 @@ any private range works, none of the public ones do.
 allocated, a replacement container sometimes asks for it while the container it
 replaces is still holding it, and compose stops with `Address already in use`.
 Run the same command again: the old one is gone by then and the new one takes
-the address. Do not answer this by deleting the `ipv4_address` lines. That puts
-the service name back in the URL, which is the thing the paragraph above says is
-rejected outright, and the queue would not come up at all.
+the address.
 
 To put the queue on a wire you do not control, terminate TLS in Valkey and use
 `rediss://` with AUTH. The check accepts that from any host.

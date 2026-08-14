@@ -316,6 +316,35 @@ describe('queue connection modes (D-206)', () => {
     ).toThrow(QueueConnectionError)
   })
 
+  it('allows plaintext to a single-label name, which no public resolver can answer', () => {
+    // A one-click platform allocates its own network and lets no template pin an
+    // address inside it, so a compose file written for one has nothing but the
+    // service name to dial. A label with no TLD is not a public destination.
+    for (const host of ['valkey-queue', 'valkey-realtime', 'redis']) {
+      for (const mode of ['collector', 'realtime-cache'] as const) {
+        const options = buildConnectionOptions({
+          mode,
+          url: `redis://default:secret@${host}:6379`,
+        })
+        expect(options.tls).toBeUndefined()
+      }
+    }
+
+    // AUTH is not what this relaxes.
+    expect(() =>
+      buildConnectionOptions({ mode: 'collector', url: 'redis://valkey-queue:6379' }),
+    ).toThrow(QueueConnectionError)
+
+    // And nothing carrying a dot rides in on it: a name that a public resolver
+    // can answer, and a literal outside the private ranges, are both still the
+    // public wire.
+    for (const host of ['queue.example.com', 'valkey-queue.svc.cluster.local', '203.0.113.5']) {
+      expect(() =>
+        buildConnectionOptions({ mode: 'collector', url: `redis://default:s@${host}:6379` }),
+      ).toThrow(QueueConnectionError)
+    }
+  })
+
   it('pins SNI so the public endpoint is verified against its own name', () => {
     const options = buildConnectionOptions({
       mode: 'collector',

@@ -19,26 +19,17 @@
 #    compose file defining its own networks produces intermittent 504s, because
 #    containers end up on two networks and the proxy picks the wrong one.
 #
-#    **THIS IS THE OPEN PROBLEM, and it is why the file is not submittable.**
 #    Dropping the network also drops the pinned `172.28.0.0/16` subnet, so the
-#    Valkey URLs below name services instead of addresses. `buildConnectionOptions`
-#    (`packages/redis/src/client.ts`) refuses a plaintext `redis://` whose host it
-#    cannot prove is private, and it proves that by matching the hostname against
-#    loopback and the RFC1918 literals. A compose service name matches none of
-#    them. So every `REALTIME_CACHE_REDIS_URL` in this file, and the collector's
-#    `EVENT_STREAM_REDIS_URL`, is refused at boot with "this hop crosses the
-#    public internet"; only the worker's queue connection passes, because
-#    `worker` is not one of the public-hop modes. Verified against the built
-#    package rather than inferred from the source.
-#
-#    Three ways out, none of them chosen. Terminate TLS in Valkey and use
-#    `rediss://`, which is the escape hatch the check already documents and which
-#    needs a CA the five dialling services trust. Put the network back and name
-#    Coolify's to the proxy with `traefik.docker.network`, which trades a proven
-#    failure for an unproven one. Or resolve the hostname and judge the address
-#    it resolves to, which is a change to the check itself and therefore Rahul's
-#    to make. It would also retire the `Address already in use` that the pinned
-#    addresses cost the ordinary compose file on every recreate.
+#    Valkey URLs below name services instead of addresses. That used to be fatal.
+#    `buildConnectionOptions` (`packages/redis/src/client.ts`) refuses a plaintext
+#    `redis://` whose host it cannot prove is private, and it proved that by
+#    matching the hostname against the RFC1918 literals, which a service name
+#    never matches; every `REALTIME_CACHE_REDIS_URL` here would have been refused
+#    at boot. Since 2026-08-14 the check also accepts a **single-label** name,
+#    because a label with no TLD has no public resolver that can answer it. That
+#    is what makes this file possible at all, and it is not Coolify-specific:
+#    none of these platforms lets a template pin an address inside the network
+#    it allocates, so all of them need the name to be dialable.
 #
 # 3. **No Caddy, and no `ports:`.** The platform terminates TLS on 80/443 and
 #    routes by hostname. Two proxies cannot both hold those ports.
