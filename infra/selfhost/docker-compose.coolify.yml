@@ -384,9 +384,17 @@ services:
       ANONYMOUS_IDENTITY_SECRET: ${SERVICE_BASE64_64_ANONIDENTITY}
       ANONYMOUS_IDENTITY_KEY_VERSION: 1
       PREVIEW_TOKEN_VERIFY_KEY_FILE: /keys/preview.public.pem
-      # Unset means every event carries null geo, a degradation and never a
-      # failure. `infra/selfhost/geoip/fetch-dbip.sh` downloads a database.
-      GEOIP_DB_PATH: /geoip/dbip-city-lite.mmdb
+      # **Deliberately unset here**, and it has to be. A path is a promise: the
+      # collector reads it at boot and refuses to start on a file that is not
+      # there, which is right everywhere a database was downloaded on purpose.
+      # This platform has no checkout to download into, so the volume below
+      # starts empty and setting this would be a crash loop on a fresh install
+      # rather than the documented degradation. Unset means null geo, which is
+      # what an install with no database should do.
+      #
+      # To turn it on: copy a database into the volume and then add
+      # `GEOIP_DB_PATH=/geoip/dbip-city-lite.mmdb` to the platform's env sheet.
+      # SELF-HOSTING.md says how under GeoIP.
     volumes:
       - keys-collector:/keys:ro
       - tracker:/srv/tracker:ro
