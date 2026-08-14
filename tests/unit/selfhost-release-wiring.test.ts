@@ -353,7 +353,7 @@ describe('the Coolify variant against the env templates', () => {
       `\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  [a-z][a-z0-9-]*:\\n|\\n[a-z]+:\\n|$)`,
     )
     const body = block.exec(COOLIFY)?.[1] ?? ''
-    const env = /\n    environment:\n([\s\S]*?)(?=\n    [a-z]|\n  [a-z]|$)/.exec(body)?.[1] ?? ''
+    const env = /\n {4}environment:\n([\s\S]*?)(?=\n {4}[a-z]|\n {2}[a-z]|$)/.exec(body)?.[1] ?? ''
     const found = new Map<string, string>()
     for (const line of env.split('\n')) {
       const match = /^\s+([A-Z][A-Z0-9_]*):\s?(.*)$/.exec(line)
