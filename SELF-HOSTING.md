@@ -403,6 +403,12 @@ a stack that is half up. Run `docker compose up -d` a second time and they start
 It costs a command, not a reset, and it is worth knowing before you go looking
 for the cause in the logs.
 
+**On a platform that owns the proxy** (Coolify, Dokploy, CapRover) the whole
+compose file is different rather than overlaid, because the differences are
+removals and an overlay cannot remove: `infra/selfhost/docker-compose.coolify.yml`,
+with [infra/selfhost/COOLIFY.md](infra/selfhost/COOLIFY.md) for what that install
+looks like and what has been verified on it.
+
 ### The Valkey URLs are IP addresses on purpose
 
 The connection factory refuses a plaintext `redis://` URL whose host it cannot
