@@ -75,7 +75,7 @@ part doing the work: a candidate publishes images under its own tag and sorts
 _above_ the release it is a candidate for, so `git tag --sort=-v:refname` lists
 `v0.1.0-rc.1` before `v0.1.0` and `git describe` would hand you the candidate.
 Dropping every tag with a `-` in it leaves only releases. To take a specific
-one, name it instead: `git checkout v0.2.0`.
+one, name it instead: `git checkout v0.2.1`.
 
 Add `--with-geoip` to that last command to download the country and city
 database in the same pass — see [GeoIP](#geoip). It is the one thing in the
@@ -103,7 +103,7 @@ them instead of compiling them. The generator has already pointed `.env` at
 them, because you checked out the tag before running it:
 
 ```sh
-grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.2.0
+grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.2.1
 docker compose pull
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
@@ -391,9 +391,16 @@ Trailing newlines are stripped, which is what `openssl` writes and what no key
 parser wants. A `_FILE` variable whose base name no service declares —
 `SSL_CERT_FILE`, say — is left alone.
 
-The overlay has not yet been run on a real host: file modes, volume ownership
-and startup ordering are unverified, so treat it as a reference to adapt rather
-than a supported path, and tell us how it goes.
+It has been run on a real host. Keys are generated once and a redeploy does not
+rotate them, the modes and the ownership hold on fresh volumes, and a service
+started before its key exists refuses to start with the reason on the line and
+then recovers on its own rather than wedging.
+
+Expect one thing on the first `up -d`. The services that wait on `keygen` can be
+left `Created` rather than started once it finishes, so `docker compose ps` shows
+a stack that is half up. Run `docker compose up -d` a second time and they start.
+It costs a command, not a reset, and it is worth knowing before you go looking
+for the cause in the logs.
 
 ### The Valkey URLs are IP addresses on purpose
 
@@ -408,6 +415,14 @@ So the compose network pins `172.28.0.0/16` and gives each Valkey a fixed
 address in it. If that subnet collides with something on your host, change
 `OA_SUBNET`, both `ipv4_address` values and the URLs in `env/*.env` together —
 any private range works, none of the public ones do.
+
+**A recreate can collide with itself.** Because the address is pinned rather than
+allocated, a replacement container sometimes asks for it while the container it
+replaces is still holding it, and compose stops with `Address already in use`.
+Run the same command again: the old one is gone by then and the new one takes
+the address. Do not answer this by deleting the `ipv4_address` lines. That puts
+the service name back in the URL, which is the thing the paragraph above says is
+rejected outright, and the queue would not come up at all.
 
 To put the queue on a wire you do not control, terminate TLS in Valkey and use
 `rediss://` with AUTH. The check accepts that from any host.
@@ -596,7 +611,7 @@ Two things worth knowing before you rely on any of it:
 
 ```sh
 git fetch --tags
-git checkout v0.2.0            # the release you are moving to
+git checkout v0.2.1            # the release you are moving to
 cd infra/selfhost
 ./upgrade.sh                   # tells you what it costs, then does it
 ```
@@ -614,7 +629,7 @@ going back is a restore.
 
 ```sh
 ./snapshot.sh list
-./rollback.sh --to backups/20260812T140000Z-pre-v0.2.0
+./rollback.sh --to backups/20260812T140000Z-pre-v0.2.1
 ```
 
 Three costs, and they belong here rather than in the rollback instructions,
@@ -639,8 +654,8 @@ Rolling back across versions means going back in the tree too — the compose fi
 and the migration set are part of the version:
 
 ```sh
-git checkout v0.1.0
-cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.2.0
+git checkout v0.2.0
+cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.2.1
 ```
 
 `rollback.sh` restores the configuration from the snapshot as well, moving the

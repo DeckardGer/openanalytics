@@ -17,10 +17,28 @@
 #
 # 2. **No `networks:` block.** Coolify's own documentation is explicit that a
 #    compose file defining its own networks produces intermittent 504s, because
-#    containers end up on two networks and the proxy picks the wrong one. Losing
-#    it also loses the pinned `172.28.0.0/16` subnet and the two Valkey static
-#    addresses, which is a bonus: on a redeploy those produced
-#    `Address already in use` until the old container released them.
+#    containers end up on two networks and the proxy picks the wrong one.
+#
+#    **THIS IS THE OPEN PROBLEM, and it is why the file is not submittable.**
+#    Dropping the network also drops the pinned `172.28.0.0/16` subnet, so the
+#    Valkey URLs below name services instead of addresses. `buildConnectionOptions`
+#    (`packages/redis/src/client.ts`) refuses a plaintext `redis://` whose host it
+#    cannot prove is private, and it proves that by matching the hostname against
+#    loopback and the RFC1918 literals. A compose service name matches none of
+#    them. So every `REALTIME_CACHE_REDIS_URL` in this file, and the collector's
+#    `EVENT_STREAM_REDIS_URL`, is refused at boot with "this hop crosses the
+#    public internet"; only the worker's queue connection passes, because
+#    `worker` is not one of the public-hop modes. Verified against the built
+#    package rather than inferred from the source.
+#
+#    Three ways out, none of them chosen. Terminate TLS in Valkey and use
+#    `rediss://`, which is the escape hatch the check already documents and which
+#    needs a CA the five dialling services trust. Put the network back and name
+#    Coolify's to the proxy with `traefik.docker.network`, which trades a proven
+#    failure for an unproven one. Or resolve the hostname and judge the address
+#    it resolves to, which is a change to the check itself and therefore Rahul's
+#    to make. It would also retire the `Address already in use` that the pinned
+#    addresses cost the ordinary compose file on every recreate.
 #
 # 3. **No Caddy, and no `ports:`.** The platform terminates TLS on 80/443 and
 #    routes by hostname. Two proxies cannot both hold those ports.
@@ -37,7 +55,9 @@
 #
 # ## Images
 #
-# Pinned to `v0.2.0`, the first release whose images carry `*_FILE` support.
+# Pinned to `v0.2.1`. `v0.2.0` is the floor whatever else moves, because it is
+# the first release whose images read a secret from a path, and handing a
+# service a file is the whole reason this variant can exist without a shell.
 # Nothing here builds: the platform pulls eight images, which is a couple of
 # minutes rather than the fifteen a build costs on a small host.
 #
@@ -238,7 +258,7 @@ services:
   # Both stores build from empty. Re-runs are safe and are the upgrade path:
   # both runners keep a ledger and apply only what is pending.
   migrate:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/migrate:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/migrate:${OA_IMAGE_TAG:-v0.2.1}
     restart: 'no'
     environment:
       ENVIRONMENT: production
@@ -256,7 +276,7 @@ services:
   # Compiles `oa.js` into a volume the collector serves. On the stock compose
   # Caddy serves it; here the collector does, from the same volume.
   tracker-build:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/tracker-build:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/tracker-build:${OA_IMAGE_TAG:-v0.2.1}
     restart: 'no'
     volumes:
       - tracker:/out
@@ -269,7 +289,7 @@ services:
   # pointing this at the api's private key fails exactly as pasting it here
   # would.
   gateway:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/query-gateway:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/query-gateway:${OA_IMAGE_TAG:-v0.2.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -298,7 +318,7 @@ services:
   # an older gateway rejects, so an api-first upgrade breaks analytics reads for
   # the length of the window while a gateway-first one has no window at all.
   api:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/api:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/api:${OA_IMAGE_TAG:-v0.2.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -339,7 +359,7 @@ services:
   # Ingest, and the one service that ever sees a raw visitor IP. Also serves
   # `oa.js` from the tracker volume, which on the stock compose is Caddy's job.
   collector:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/collector:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/collector:${OA_IMAGE_TAG:-v0.2.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -372,7 +392,7 @@ services:
 
   # The SSE stream behind the live dashboard.
   realtime:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/realtime:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/realtime:${OA_IMAGE_TAG:-v0.2.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -395,7 +415,7 @@ services:
   # Drains the queue into ClickHouse; sessions, rollups, exports, mail,
   # deletions. Never public.
   worker:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/worker:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/worker:${OA_IMAGE_TAG:-v0.2.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -428,7 +448,7 @@ services:
   # service a platform install has to build rather than pull if the three
   # origins are not the ones baked in.
   web:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/web:${OA_IMAGE_TAG:-v0.2.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/web:${OA_IMAGE_TAG:-v0.2.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production

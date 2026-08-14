@@ -702,10 +702,14 @@ function ConnectProviderFlow({
         </div>
       ) : step === 2 ? (
         <div className="flex flex-col gap-3 p-4">
+          {/* Not "whether your pages send anything about the visitor": that
+              was true of the browser half alone, and D4b made the switch the
+              decision itself. The framing has to survive somebody reading it
+              beside a journey that never appeared. */}
           <p className="text-xs leading-5 text-muted-foreground">
-            Both modes read the same payments. The difference is whether your
-            pages send anything about the visitor who made one, and that is
-            yours to decide rather than ours to assume.
+            Both modes read the same payments. The difference is whether one is
+            tied back to the visit that produced it, and that is yours to decide
+            rather than ours to assume.
           </p>
           <RevenueModeChoice
             onValueChange={setAttributed}
