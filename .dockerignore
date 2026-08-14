@@ -28,5 +28,19 @@ coverage/
 docs/
 infra/
 .github/
+
+# Two exceptions, and they are the whole reason this file is not just a list of
+# exclusions. `clickhouse.Dockerfile` and `valkey.Dockerfile` COPY out of
+# `infra/selfhost/`, so the rule above hides their inputs from the build context
+# and the build fails with `"/infra/selfhost/clickhouse/oa-entrypoint.sh": not
+# found`, a message that points at the Dockerfile and not at the reason.
+#
+# The directory itself is re-included as well as its contents: an excluded
+# directory is not descended into, so re-including only `**` under it finds
+# nothing. Five small text files, and no other image reads them.
+!infra/selfhost/clickhouse
+!infra/selfhost/clickhouse/**
+!infra/selfhost/valkey
+!infra/selfhost/valkey/**
 **/.DS_Store
 **/Thumbs.db

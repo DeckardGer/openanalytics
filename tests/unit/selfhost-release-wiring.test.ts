@@ -258,3 +258,71 @@ describe('the images generate-secrets.sh writes into a fresh .env', () => {
     expect(generator).toMatch(/echo "images: \$\{IMAGE_MODE\}"/)
   })
 })
+
+/**
+ * The build context has to contain what the Dockerfiles copy out of it.
+ *
+ * `.dockerignore` excludes `infra/` wholesale, which was right while every
+ * image was built from `apps/` and `packages/`. `clickhouse.Dockerfile` and
+ * `valkey.Dockerfile` copy five files out of `infra/selfhost/`, so without an
+ * exception the release fails on those two images with
+ * `"/infra/selfhost/clickhouse/oa-entrypoint.sh": not found`, a message that
+ * names the Dockerfile and says nothing about the ignore file that caused it.
+ *
+ * It got out once, on the v0.3.0 tag, because the images were proven by
+ * building them from a hand-made tarball that had no `.dockerignore` in it. A
+ * build is only as faithful as its context.
+ */
+describe('what the self-host Dockerfiles copy', () => {
+  const DOCKERIGNORE = read('.dockerignore')
+
+  /** `COPY infra/selfhost/valkey/valkey-queue.conf /usr/local/etc/...` */
+  const COPY_SOURCE = /^COPY\s+(?:--\S+\s+)*(\S+)\s/gm
+
+  const sourcesOf = (dockerfile: string) =>
+    matchAll(read(`infra/selfhost/${dockerfile}`), COPY_SOURCE).filter((source) =>
+      source.startsWith('infra/'),
+    )
+
+  /**
+   * The negations, with their `/**` suffix removed so a directory rule can be
+   * compared against a file path by prefix.
+   */
+  const negations = DOCKERIGNORE.split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('!'))
+    .map((line) =>
+      line
+        .slice(1)
+        .replace(/\/\*\*$/, '')
+        .replace(/\/$/, ''),
+    )
+
+  for (const dockerfile of ['clickhouse.Dockerfile', 'valkey.Dockerfile']) {
+    it(`is in the context: ${dockerfile}`, () => {
+      const sources = sourcesOf(dockerfile)
+      expect(sources.length).toBeGreaterThan(0)
+
+      for (const source of sources) {
+        // On disk at all. A COPY of a path nobody wrote fails the same way and
+        // would otherwise be blamed on the ignore file.
+        expect(() => read(source)).not.toThrow()
+
+        // And reachable: some `!` line covers it, either exactly or as a parent
+        // directory of it.
+        const covered = negations.some(
+          (allowed) => source === allowed || source.startsWith(`${allowed}/`),
+        )
+        expect(covered, `${source} is excluded from the build context`).toBe(true)
+      }
+    })
+  }
+
+  it('re-includes the directory as well as its contents', () => {
+    // An excluded directory is not descended into, so `!infra/selfhost/valkey/**`
+    // on its own matches nothing. Both lines are load-bearing.
+    for (const directory of ['infra/selfhost/clickhouse', 'infra/selfhost/valkey']) {
+      expect(negations).toContain(directory)
+    }
+  })
+})
