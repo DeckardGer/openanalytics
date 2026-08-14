@@ -73,7 +73,7 @@ export function RevenueModeChoice({
       >
         <Option
           checked={mode === "totals"}
-          description="Nothing is asked of your visitors, and no payment is tied to one. That holds on both sides: a payment carrying a reference from your own Stripe integration is not matched to a visit either. Totals, refunds, disputes and fees all work, and journeys stay empty."
+          description="Nothing is asked of your visitors and no payment is tied to one, including a payment carrying a reference from your own Stripe integration. Totals, refunds, disputes and fees all work, and journeys stay empty."
           title="Revenue totals"
           value="totals"
         />

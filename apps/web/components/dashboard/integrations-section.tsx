@@ -342,12 +342,22 @@ function RevenueModePanel({
     <SettingsPanel title="Revenue mode">
       <SkeletonReveal
         ready={revealed && resource.status !== "loading"}
-        skeleton={<SkeletonBar className="h-28 w-full rounded-lg" />}
+        skeleton={
+          // Shaped like what it stands in for rather than one bar: two option
+          // rows and the paragraph under them, so the swap does not resize the
+          // card. `ApiErrorPanel` stays outside this padding because it brings
+          // its own, the same way the Revenue panel beside this one is built.
+          <div className="flex flex-col gap-3 p-5">
+            <SkeletonBar className="h-[104px] w-full rounded-lg" />
+            <SkeletonBar className="h-[84px] w-full rounded-lg" />
+            <SkeletonBar className="h-16 w-full rounded-md" />
+          </div>
+        }
       >
         {resource.status === "error" ? (
           <ApiErrorPanel error={resource.error} onRetry={resource.retry} />
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 p-5">
             <RevenueModeChoice
               disabled={!canManage || write.busy}
               onValueChange={(next) => write.run(next)}
