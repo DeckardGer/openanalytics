@@ -54,9 +54,9 @@
 #
 # ## Images
 #
-# Pinned to `v0.3.0`, which is the floor for this file rather than a preference:
-# it is the release that first publishes `clickhouse` and `valkey`, and without
-# those two this variant cannot start at all. Nothing here builds: the platform
+# Pinned to `v0.3.1`. `v0.3.0` is the floor whatever else moves, because it is
+# the release that first publishes `clickhouse` and `valkey`, and without those
+# two this variant cannot start at all. Nothing here builds: the platform
 # pulls ten images, a couple of minutes rather than the fifteen a build costs on
 # a small host.
 #
@@ -139,7 +139,7 @@ services:
   # file and nothing beside it, so a relative bind source becomes an empty
   # directory and the container dies with "oa-entrypoint.sh: Is a directory".
   clickhouse:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/clickhouse:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/clickhouse:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       CLICKHOUSE_INGEST_PASSWORD: ${SERVICE_PASSWORD_CHINGEST}
@@ -162,7 +162,7 @@ services:
   # The durable event queue. Between the collector's 202 and the worker's
   # insert this instance holds the only copy of an event.
   valkey-queue:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/valkey:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/valkey:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       VALKEY_PASSWORD: ${SERVICE_PASSWORD_VALKEYQUEUE}
@@ -181,7 +181,7 @@ services:
 
   # Presence, rate-limit counters, short-lived caches. Losable by design.
   valkey-realtime:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/valkey:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/valkey:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       VALKEY_PASSWORD: ${SERVICE_PASSWORD_VALKEYREALTIME}
@@ -256,7 +256,7 @@ services:
   # Both stores build from empty. Re-runs are safe and are the upgrade path:
   # both runners keep a ledger and apply only what is pending.
   migrate:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/migrate:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/migrate:${OA_IMAGE_TAG:-v0.3.1}
     restart: 'no'
     # **Required, not decoration.** This is the worker's image under another
     # tag, so without an entrypoint of its own it boots as the worker, loads the
@@ -287,7 +287,7 @@ services:
   # Compiles `oa.js` into a volume the collector serves. On the stock compose
   # Caddy serves it; here the collector does, from the same volume.
   tracker-build:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/tracker-build:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/tracker-build:${OA_IMAGE_TAG:-v0.3.1}
     restart: 'no'
     volumes:
       - tracker:/out
@@ -300,7 +300,7 @@ services:
   # pointing this at the api's private key fails exactly as pasting it here
   # would.
   gateway:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/query-gateway:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/query-gateway:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -329,7 +329,7 @@ services:
   # an older gateway rejects, so an api-first upgrade breaks analytics reads for
   # the length of the window while a gateway-first one has no window at all.
   api:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/api:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/api:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -380,7 +380,7 @@ services:
   # Ingest, and the one service that ever sees a raw visitor IP. Also serves
   # `oa.js` from the tracker volume, which on the stock compose is Caddy's job.
   collector:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/collector:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/collector:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -438,7 +438,7 @@ services:
 
   # The SSE stream behind the live dashboard.
   realtime:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/realtime:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/realtime:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -471,7 +471,7 @@ services:
   # Drains the queue into ClickHouse; sessions, rollups, exports, mail,
   # deletions. Never public.
   worker:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/worker:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/worker:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -504,7 +504,7 @@ services:
   # service a platform install has to build rather than pull if the three
   # origins are not the ones baked in.
   web:
-    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/web:${OA_IMAGE_TAG:-v0.3.0}
+    image: ${OA_IMAGE_REPO:-ghcr.io/openlabs-so/openanalytics}/web:${OA_IMAGE_TAG:-v0.3.1}
     restart: unless-stopped
     environment:
       NODE_ENV: production

@@ -75,7 +75,7 @@ part doing the work: a candidate publishes images under its own tag and sorts
 _above_ the release it is a candidate for, so `git tag --sort=-v:refname` lists
 `v0.1.0-rc.1` before `v0.1.0` and `git describe` would hand you the candidate.
 Dropping every tag with a `-` in it leaves only releases. To take a specific
-one, name it instead: `git checkout v0.3.0`.
+one, name it instead: `git checkout v0.3.1`.
 
 Add `--with-geoip` to that last command to download the country and city
 database in the same pass — see [GeoIP](#geoip). It is the one thing in the
@@ -104,7 +104,7 @@ instead of compiling them. The generator has already pointed `.env` at them,
 because you checked out the tag before running it:
 
 ```sh
-grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.3.0
+grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.3.1
 docker compose pull
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
@@ -624,7 +624,7 @@ Two things worth knowing before you rely on any of it:
 
 ```sh
 git fetch --tags
-git checkout v0.3.0            # the release you are moving to
+git checkout v0.3.1            # the release you are moving to
 cd infra/selfhost
 ./upgrade.sh                   # tells you what it costs, then does it
 ```
@@ -642,7 +642,7 @@ going back is a restore.
 
 ```sh
 ./snapshot.sh list
-./rollback.sh --to backups/20260812T140000Z-pre-v0.3.0
+./rollback.sh --to backups/20260812T140000Z-pre-v0.3.1
 ```
 
 Three costs, and they belong here rather than in the rollback instructions,
@@ -667,8 +667,8 @@ Rolling back across versions means going back in the tree too — the compose fi
 and the migration set are part of the version:
 
 ```sh
-git checkout v0.2.1
-cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.3.0
+git checkout v0.3.0
+cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.3.1
 ```
 
 `rollback.sh` restores the configuration from the snapshot as well, moving the

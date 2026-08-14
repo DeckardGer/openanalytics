@@ -123,16 +123,25 @@ against the version it is a candidate for — `v0.2.0-rc.1` wants `0.2.0` in
 `package.json`, not `0.2.0-rc.1`, so a second attempt is a tag rather than
 another commit.
 
-## The one thing that is not automated
+## Check that a new package is public. Do not assume either way
 
-Container images published to GHCR are **private when the package is first
-created**, whatever the repository's visibility. So a release that introduces an
-image publishes a package nobody outside the organisation can pull, and the fix
-is a visit to that package's settings page: `Package settings`, then `Change
-visibility`, then `Public`. There is no API for it and no setting that pre-empts
-it.
+A container package can be **private when it is first created**, whatever the
+repository's visibility, and there is no API to change it: the fix is a visit to
+that package's settings page (`Package settings`, then `Change visibility`, then
+`Public`).
 
-It is a one-time cost per package name. It landed on the first release for the
-original eight, and on the release that added `clickhouse` and `valkey` for those
-two. If a `docker compose pull` from a clean machine says `denied` or `manifest
-unknown` for one image and works for the others, this is why.
+That happened on v0.1.0 for the original eight. It did **not** happen on v0.3.0,
+which added `clickhouse` and `valkey`: both came out public with nothing clicked.
+Two data points and no announcement of a change between them, so the honest rule
+is to check rather than to believe either one.
+
+Checking is one command per new image, from a machine that has never logged in
+to GHCR, which is the only place the answer is real:
+
+```sh
+docker manifest inspect ghcr.io/openlabs-so/openanalytics/<name>:<version>
+```
+
+A release that adds no image needs none of this. If a `docker compose pull` from
+a clean machine says `denied` or `manifest unknown` for one image and works for
+the others, this is why.
