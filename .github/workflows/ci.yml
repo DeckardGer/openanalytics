@@ -347,7 +347,7 @@ jobs:
   # restores, and reads the row back. It uses the real compose file, the real
   # generator and the real scripts. No application image is built: the two stores
   # and the helper image are all that is needed to prove the mechanism, and
-  # building eight images to insert one row would put this job out of reach of
+  # building ten images to insert one row would put this job out of reach of
   # every pull request.
   selfhost:
     name: Snapshot and restore
@@ -401,8 +401,15 @@ jobs:
           images="$(docker compose config --images | grep '^ghcr.io/openlabs-so/openanalytics/' | sort -u)"
           echo "$images"
           count="$(echo "$images" | wc -l)"
-          [ "$count" -eq 8 ] || { echo "::error::expected 8 published images, resolved $count"; exit 1; }
+          # Ten since v0.3.0: `clickhouse` and `valkey` became ours when the
+          # files they cannot start without stopped being bind mounts. Kept in
+          # step by `tests/unit/selfhost-release-wiring.test.ts`, which compares
+          # the compose file against the release matrix; this line is the third
+          # copy of the number and the only one CI can check against a real
+          # `docker compose config`.
+          [ "$count" -eq 10 ] || { echo "::error::expected 10 published images, resolved $count"; exit 1; }
           echo "$images" | grep -qx 'ghcr.io/openlabs-so/openanalytics/api:v9.9.9-check'
+          echo "$images" | grep -qx 'ghcr.io/openlabs-so/openanalytics/valkey:v9.9.9-check'
 
       - name: Start the two stores
         run: |
@@ -430,7 +437,7 @@ jobs:
             "INSERT INTO default.snapshot_marker VALUES ('survives a restore')"
 
       # --no-start, then start the two by hand: `snapshot.sh` would otherwise
-      # bring the whole stack up, which here means building eight images.
+      # bring the whole stack up, which here means building ten images.
       - name: Take a snapshot
         run: |
           set -euo pipefail
