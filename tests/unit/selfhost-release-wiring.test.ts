@@ -42,11 +42,17 @@ const RELEASE_WORKFLOW = read('.github/workflows/release.yml')
  */
 const EXPECTED_IMAGES = [
   'api',
+  // Upstream's server plus the config drop-in and the entrypoint that renders
+  // its four users. Ours since 2026-08-14, because the bind mounts that used to
+  // deliver them work in a checkout and nowhere else.
+  'clickhouse',
   'collector',
   'migrate',
   'query-gateway',
   'realtime',
   'tracker-build',
+  // One image, both policy files, the role chosen by `OA_VALKEY_CONF`.
+  'valkey',
   'web',
   'worker',
 ]
@@ -68,14 +74,17 @@ function matchAll(source: string, pattern: RegExp): string[] {
 }
 
 describe('the images a release publishes', () => {
-  it('is the set the compose file runs — eight of them', () => {
+  it('is the set the compose file runs, ten of them', () => {
     const composeImages = [...new Set(matchAll(COMPOSE, COMPOSE_IMAGE))].sort()
 
-    // `migrate` twice: the migration one-shot and `create-admin`, which reuses
-    // it deliberately rather than being a ninth image.
-    expect(matchAll(COMPOSE, COMPOSE_IMAGE)).toHaveLength(9)
+    // Twelve references, ten names. `migrate` twice: the migration one-shot and
+    // `create-admin`, which reuses it deliberately rather than being its own
+    // image. `valkey` twice: the queue and the realtime cache are the same
+    // server under different policy, and which one is chosen by an env var
+    // rather than by a second image of identical bytes.
+    expect(matchAll(COMPOSE, COMPOSE_IMAGE)).toHaveLength(12)
     expect(composeImages).toEqual(EXPECTED_IMAGES)
-    expect(composeImages).toHaveLength(8)
+    expect(composeImages).toHaveLength(10)
   })
 
   it('is the set the release workflow builds', () => {

@@ -75,7 +75,7 @@ Architecture rules CI enforces, not conventions:
 every failure mode. Requirements are a Linux host with Docker, four DNS records
 and about 4 GB of RAM.
 
-**Installing is a pull, not a build.** A release publishes eight images to
+**Installing is a pull, not a build.** A release publishes ten images to
 `ghcr.io/openlabs-so/openanalytics`, so a fresh host is a few minutes and needs
 no toolchain on it.
 
@@ -105,7 +105,7 @@ a convenience — the compose file, the env templates and the migrations ship
 _with_ the images, so a release's images against another tree is a configuration
 nobody has tested.
 
-Images are amd64. On arm64, or to run a branch, build the eight here instead:
+Images are amd64. On arm64, or to run a branch, build the ten here instead:
 same compose file, one flag, about ten minutes and swap on a 4 GB box. Later,
 `./upgrade.sh` moves between releases and takes the snapshot `./rollback.sh`
 needs, because **migrations do not go down**: the way back is a restore, and a

@@ -1,15 +1,18 @@
 name: Release
 
-# Publishes the eight container images a release consists of, on a tag.
+# Publishes the ten container images a release consists of, on a tag.
 #
-# WHY EIGHT. Count them in `infra/selfhost/docker-compose.yml`: migrate,
-# tracker-build, api, collector, worker, query-gateway, realtime, web. Seven is
-# the number you get by forgetting that `migrate` is its own image — it shares
-# the worker's Dockerfile and layers but not its tag, because two services must
-# never claim to produce the same image. `create-admin` is the ninth service that
-# runs the `migrate` image and not a ninth image.
+# WHY TEN. Count them in `infra/selfhost/docker-compose.yml`: migrate,
+# tracker-build, api, collector, worker, query-gateway, realtime, web,
+# clickhouse, valkey. Two ways to get it wrong, both of them made once already.
+# `migrate` is its own image: it shares the worker's Dockerfile and layers but
+# not its tag, because two services must never claim to produce the same image,
+# and `create-admin` is a service that runs the `migrate` image rather than an
+# image of its own. And `valkey` is one image for two services: the queue and
+# the realtime cache are the same server under different policy, and both policy
+# files ship in it with `OA_VALKEY_CONF` naming which applies.
 #
-# `tests/unit/selfhost-templates.test.ts` asserts that this list and the compose
+# `tests/unit/selfhost-release-wiring.test.ts` asserts that this list and the compose
 # file's list are the same set, so the two cannot drift apart quietly.
 #
 # ## Permissions
@@ -20,11 +23,12 @@ name: Release
 # this workflow only. Nothing needs to be clicked for that.
 #
 # What DOES need a click, once per package name: a container package is PRIVATE
-# when it is first created, whatever the repository's visibility. The first
-# release publishes eight packages that only the organisation can pull, and
-# making them public is eight visits to each package's settings page. There is no
-# API for it. /RELEASING.md says so where somebody cutting a release will read
-# it.
+# when it is first created, whatever the repository's visibility. So a release
+# that introduces an image publishes a package nobody outside the organisation
+# can pull, and making it public is a visit to that package's settings page.
+# There is no API for it. It landed on v0.1.0 for the first eight and on the
+# release that adds `clickhouse` and `valkey` for those two. /RELEASING.md says
+# so where somebody cutting a release will read it.
 #
 # ## One architecture
 #
@@ -47,7 +51,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Build all eight images and push nothing'
+        description: 'Build all ten images and push nothing'
         type: boolean
         default: true
 
@@ -63,7 +67,7 @@ env:
 
 jobs:
   # Cheap and first: a tag that disagrees with the tree is a release nobody can
-  # reason about afterwards, and finding out after eight image builds is finding
+  # reason about afterwards, and finding out after ten image builds is finding
   # out too late.
   check:
     name: The tag and the tree agree
@@ -124,11 +128,11 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     strategy:
-      # One image's failure must not cancel seven builds that were going to
+      # One image's failure must not cancel nine builds that were going to
       # succeed: a partial publish is recoverable by re-running the workflow,
       # and knowing which images are missing is what makes it recoverable.
       fail-fast: false
-      # Eight simultaneous pushes of images this size is enough to trip GHCR's
+      # Ten simultaneous pushes of images this size is enough to trip GHCR's
       # secondary rate limit, which arrives as `denied: permission_denied` with
       # a 403 — indistinguishable at a glance from a token that cannot write.
       # Measured on the v0.1.0 tag: seven pushed, `tracker-build` was refused,
@@ -160,6 +164,17 @@ jobs:
           # The dashboard, from its own Dockerfile.
           - image: web
             dockerfile: infra/selfhost/web.Dockerfile
+          # The two stores that carry configuration. Upstream's images plus the
+          # files they cannot start correctly without: a config drop-in and the
+          # entrypoint that renders ClickHouse's four users, and Valkey's two
+          # policy files and its entrypoint. They used to be bind-mounted, which
+          # works in a checkout and nowhere else. A platform that writes only
+          # the rendered compose file leaves Docker to create an empty directory
+          # for every missing bind source, and the container dies on it.
+          - image: clickhouse
+            dockerfile: infra/selfhost/clickhouse.Dockerfile
+          - image: valkey
+            dockerfile: infra/selfhost/valkey.Dockerfile
     steps:
       - uses: actions/checkout@v5
 
@@ -324,7 +339,7 @@ jobs:
               echo "**Not every image was published.** Open the matrix above, find the"
               echo "ones that failed, and re-run the failed jobs — a tag pointing at an"
               echo "incomplete image set fails somebody's \`docker compose pull\` on one"
-              echo "image and works on the other seven."
+              echo "image and works on the other nine."
               echo
             fi
             if [ "${{ needs.check.outputs.push }}" = "true" ]; then
@@ -333,7 +348,7 @@ jobs:
               echo "Dry run — built, not pushed:"
             fi
             echo
-            for image in migrate tracker-build api collector worker query-gateway realtime web; do
+            for image in migrate tracker-build api collector worker query-gateway realtime web clickhouse valkey; do
               echo "- \`$image\`"
             done
             echo

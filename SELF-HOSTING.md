@@ -75,7 +75,7 @@ part doing the work: a candidate publishes images under its own tag and sorts
 _above_ the release it is a candidate for, so `git tag --sort=-v:refname` lists
 `v0.1.0-rc.1` before `v0.1.0` and `git describe` would hand you the candidate.
 Dropping every tag with a `-` in it leaves only releases. To take a specific
-one, name it instead: `git checkout v0.2.1`.
+one, name it instead: `git checkout v0.3.0`.
 
 Add `--with-geoip` to that last command to download the country and city
 database in the same pass — see [GeoIP](#geoip). It is the one thing in the
@@ -97,13 +97,14 @@ further** — see [Losing a secret](#losing-a-secret).
 
 ### 3. Bring it up
 
-A release publishes **eight images** — `migrate`, `tracker-build`, `api`,
-`collector`, `worker`, `query-gateway`, `realtime`, `web` — so an install pulls
-them instead of compiling them. The generator has already pointed `.env` at
-them, because you checked out the tag before running it:
+A release publishes **ten images**: `migrate`, `tracker-build`, `api`,
+`collector`, `worker`, `query-gateway`, `realtime`, `web`, and the two stores
+that carry configuration, `clickhouse` and `valkey`. An install pulls them
+instead of compiling them. The generator has already pointed `.env` at them,
+because you checked out the tag before running it:
 
 ```sh
-grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.2.1
+grep OA_IMAGE .env                 # ghcr.io/openlabs-so/openanalytics, v0.3.0
 docker compose pull
 docker compose up -d
 docker compose logs -f migrate     # schemas, both stores, from empty
@@ -129,7 +130,7 @@ about. Everything else is identical.
 #### Building instead of pulling
 
 `OA_IMAGE_REPO=openanalytics` and `OA_IMAGE_TAG=local` name images no registry
-serves, which is what makes compose build all eight here:
+serves, which is what makes compose build all ten here:
 
 ```sh
 docker compose up -d --build
@@ -152,7 +153,7 @@ echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survive a reboot
 
 Swap is needed for the **build**, not to run the product: a 4 GB host serves an
 ordinary install comfortably once the images exist. Leaving it on costs a file
-and rescues you the next time you build. Building all eight takes about ten
+and rescues you the next time you build. Building all ten takes about ten
 minutes on that box, most of it compiling.
 
 Either way, the order is enforced by the compose file and is not cosmetic:
@@ -470,6 +471,18 @@ its EULA forbids redistribution.
 database goes stale, and the collector opens it once at boot — a new file on
 disk changes nothing until the process restarts.
 
+**On a one-click platform there is no directory to fetch into.** Coolify and its
+peers write the rendered compose file and nothing beside it, so
+`docker-compose.coolify.yml` gives `/geoip` a named volume that starts empty and
+geo is null until you fill it. Two files could be baked into images and were;
+a licensed 125 MB database refreshed monthly could not. Fetch it wherever you
+have a shell and copy it in:
+
+```sh
+docker cp dbip-city-lite.mmdb <collector-container>:/geoip/
+docker restart <collector-container>
+```
+
 The database is never committed: a 60 MB download that unpacks to about 125 MB,
 out of date within a month, and a database in git history is in git history
 forever.
@@ -611,7 +624,7 @@ Two things worth knowing before you rely on any of it:
 
 ```sh
 git fetch --tags
-git checkout v0.2.1            # the release you are moving to
+git checkout v0.3.0            # the release you are moving to
 cd infra/selfhost
 ./upgrade.sh                   # tells you what it costs, then does it
 ```
@@ -629,7 +642,7 @@ going back is a restore.
 
 ```sh
 ./snapshot.sh list
-./rollback.sh --to backups/20260812T140000Z-pre-v0.2.1
+./rollback.sh --to backups/20260812T140000Z-pre-v0.3.0
 ```
 
 Three costs, and they belong here rather than in the rollback instructions,
@@ -654,8 +667,8 @@ Rolling back across versions means going back in the tree too — the compose fi
 and the migration set are part of the version:
 
 ```sh
-git checkout v0.2.0
-cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.2.1
+git checkout v0.2.1
+cd infra/selfhost && ./rollback.sh --to backups/20260812T140000Z-pre-v0.3.0
 ```
 
 `rollback.sh` restores the configuration from the snapshot as well, moving the

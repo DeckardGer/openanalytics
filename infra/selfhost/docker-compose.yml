@@ -122,18 +122,22 @@ services:
       retries: 10
     networks: [oa]
 
+  # Upstream's server plus our config drop-in and the entrypoint that renders the
+  # four users, baked in rather than bind-mounted. Both files still live in
+  # `clickhouse/` and are COPYed at build, so there is one copy of each; what
+  # changed is that a deployment no longer needs this directory on disk beside
+  # the compose file, which is what the one-click platforms cannot provide. To
+  # edit one without a release, bind-mount over it: a mount still wins.
   clickhouse:
-    image: clickhouse/clickhouse-server:26.3.17.56
+    image: ${OA_IMAGE_REPO:-openanalytics}/clickhouse:${OA_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infra/selfhost/clickhouse.Dockerfile
     container_name: oa-clickhouse
     restart: unless-stopped
-    # The users and their grants are rendered here at every start. Nothing else
-    # creates them — see the header of the script.
-    entrypoint: ['bash', '/usr/local/bin/oa-entrypoint.sh']
     env_file: env/clickhouse.env
     volumes:
       - ch-data:/var/lib/clickhouse
-      - ./clickhouse/config.d/openanalytics.xml:/etc/clickhouse-server/config.d/openanalytics.xml:ro
-      - ./clickhouse/oa-entrypoint.sh:/usr/local/bin/oa-entrypoint.sh:ro
     ulimits:
       nofile:
         soft: 262144
@@ -152,15 +156,20 @@ services:
   # The durable event queue. Between the collector's 202 and the worker's
   # insert, this instance holds the only copy of an event.
   valkey-queue:
-    image: valkey/valkey:8-alpine
+    image: ${OA_IMAGE_REPO:-openanalytics}/valkey:${OA_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infra/selfhost/valkey.Dockerfile
     container_name: oa-valkey-queue
     restart: unless-stopped
-    entrypoint: ['sh', '/usr/local/bin/oa-valkey-entrypoint.sh']
+    environment:
+      # One image, both policies. Durable: appendonly, no eviction. Named rather
+      # than defaulted, because a default would be a guess about whether an
+      # acknowledged event may be evicted before the worker inserts it.
+      OA_VALKEY_CONF: /usr/local/etc/valkey/valkey-queue.conf
     env_file: env/valkey-queue.env
     volumes:
       - valkey-queue-data:/data
-      - ./valkey/valkey-queue.conf:/usr/local/etc/valkey/valkey.conf:ro
-      - ./valkey/valkey-entrypoint.sh:/usr/local/bin/oa-valkey-entrypoint.sh:ro
     healthcheck:
       # REDISCLI_AUTH rather than `-a`: a password in argv is visible to every
       # process on the host.
@@ -178,15 +187,18 @@ services:
 
   # Presence, rate-limit counters, short-lived caches. Losable by design.
   valkey-realtime:
-    image: valkey/valkey:8-alpine
+    image: ${OA_IMAGE_REPO:-openanalytics}/valkey:${OA_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infra/selfhost/valkey.Dockerfile
     container_name: oa-valkey-realtime
     restart: unless-stopped
-    entrypoint: ['sh', '/usr/local/bin/oa-valkey-entrypoint.sh']
+    environment:
+      # Losable by design: allkeys-lru inside a memory bound.
+      OA_VALKEY_CONF: /usr/local/etc/valkey/valkey-realtime.conf
     env_file: env/valkey-realtime.env
     volumes:
       - valkey-realtime-data:/data
-      - ./valkey/valkey-realtime.conf:/usr/local/etc/valkey/valkey.conf:ro
-      - ./valkey/valkey-entrypoint.sh:/usr/local/bin/oa-valkey-entrypoint.sh:ro
     healthcheck:
       test: ['CMD-SHELL', 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
       interval: 10s

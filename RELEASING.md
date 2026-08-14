@@ -7,7 +7,7 @@ predict from is decoration.
 ## The tag is the product
 
 A release is one commit, named `vX.Y.Z`, and **everything ships from it
-together**: the eight images, the compose file, the env templates, the
+together**: the ten images, the compose file, the env templates, the
 Caddyfile, the migrations and the documentation. They are one artifact that
 happens to be stored in two places — the git tag and the container registry.
 
@@ -107,7 +107,7 @@ keepable. Not before.
    installed.
 3. `git tag -a v0.1.0 -m "v0.1.0"` and push the tag.
 4. `.github/workflows/release.yml` fires on the tag: it checks the version
-   agreement, builds the eight images and pushes them to
+   agreement, builds the ten images and pushes them to
    `ghcr.io/openlabs-so/openanalytics/*` tagged with the version, and — for a
    final release only — moves `latest`.
 5. Watch it. **A release whose workflow failed is a tag pointing at images that
@@ -116,7 +116,7 @@ compose pull` that cannot find a manifest.
 6. Write the release notes on the GitHub release. What changed, and — first,
    before anything else — whatever an upgrading operator has to do by hand.
 
-**Pre-releases** are `vX.Y.Z-rc.N`. They publish the same eight images under the
+**Pre-releases** are `vX.Y.Z-rc.N`. They publish the same ten images under the
 pre-release tag and deliberately do not move `latest`, so the way to test the
 pipeline is to use it rather than to reason about it. A candidate is checked
 against the version it is a candidate for — `v0.2.0-rc.1` wants `0.2.0` in
@@ -126,12 +126,13 @@ another commit.
 ## The one thing that is not automated
 
 Container images published to GHCR are **private when the package is first
-created**, whatever the repository's visibility. The first release therefore
-publishes eight packages nobody outside the organisation can pull, and the fix
-is eight visits to the package settings page — `Package settings` → `Change
-visibility` → `Public`. There is no API for it and no setting that pre-empts it.
+created**, whatever the repository's visibility. So a release that introduces an
+image publishes a package nobody outside the organisation can pull, and the fix
+is a visit to that package's settings page: `Package settings`, then `Change
+visibility`, then `Public`. There is no API for it and no setting that pre-empts
+it.
 
-It is a one-time cost per package name, so it lands on the first release and on
-any release that adds a ninth image. If a `docker compose pull` from a clean
-machine says `denied` or `manifest unknown` for one image and works for the
-others, this is why.
+It is a one-time cost per package name. It landed on the first release for the
+original eight, and on the release that added `clickhouse` and `valkey` for those
+two. If a `docker compose pull` from a clean machine says `denied` or `manifest
+unknown` for one image and works for the others, this is why.
