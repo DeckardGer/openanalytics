@@ -46,7 +46,7 @@ has one dot before `coolify`, the extension is `.yml` and not `.yaml`.
 on the create screen, and on 4.3.2 the field does not appear afterwards either.
 It does not matter, and the reason is worth knowing rather than working around:
 **the images are pinned in the compose file, not by the checkout.** Every
-`image:` line here reads `${OA_IMAGE_TAG:-v0.4.1}`, so a clone of `main` runs
+`image:` line here reads `${OA_IMAGE_TAG:-v0.4.2}`, so a clone of `main` runs
 the release named in the file it just cloned. What a tag would add is that the
 env templates and the migrations come from the same commit as well; `main`
 carries them too, right up until the next change lands on it.
@@ -127,11 +127,13 @@ set here.
 
 ## 4. Deploy
 
-The first deploy pulls nine images, about 2 GB. Nothing is built.
+The first deploy pulls nine images, about 2 GB, and downloads a 60 MB geo
+database. Nothing is built.
 
-When it finishes there are **twelve containers, and two of them have exited**.
-That is success, not failure: `migrate` and `keygen` are one-shot steps that do
-their work and stop. The other ten stay up and go healthy, `web` last.
+When it finishes there are **thirteen containers, and three of them have
+exited**. That is success, not failure: `migrate`, `keygen` and `geoip` are
+one-shot steps that do their work and stop. The other ten stay up and go
+healthy, `web` last.
 
 Then open `https://app.<domain>`. A deployment nobody has signed into offers to
 create the first account rather than asking you to sign in. **Do that
@@ -140,11 +142,31 @@ public. It closes permanently the moment one account exists.
 
 ## Things that are true here and nowhere else
 
-**GeoIP starts empty and geo is null.** Two config files could be baked into
-images and were; a licensed 125 MB database refreshed monthly could not, and this
-platform has no checkout to download one into. To turn it on, copy a database
-into the collector's `/geoip` volume and add `GEOIP_DB_PATH` to the environment.
-See [SELF-HOSTING.md](../../SELF-HOSTING.md#geoip).
+**The geo database is fetched for you, and it comes with a licence condition.**
+Through v0.4.1 this install reported a null country for every visitor: the volume
+started empty and there is no checkout here to fill it from. The `geoip` one-shot
+now downloads **DB-IP City Lite** on the first deploy and never again, so the
+network is a first-install dependency and later deploys skip it entirely.
+
+DB-IP and not MaxMind because of the licence, and it is the whole reason a
+download on your behalf is possible at all: GeoLite2 needs an account and a
+licence key and forbids redistribution, while DB-IP City Lite is
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). **That licence asks
+for credit wherever you show the data:**
+
+> IP Geolocation by DB-IP, [https://db-ip.com](https://db-ip.com), used under
+> CC BY 4.0.
+
+The databases go stale within a month or two. To refresh, delete
+`dbip-city-lite.mmdb` from the `geoip` volume and redeploy. To use MaxMind
+instead, copy your own file in and point `GEOIP_DB_PATH` at it.
+
+**A failed download fails the deploy.** The collector reads `GEOIP_DB_PATH` at
+boot and refuses to start on a path that names no file, so the alternative is a
+crash loop one step further from its cause. Redeploy to retry. To install with no
+geo at all, delete the `geoip` service, its `depends_on` entry and the
+collector's `GEOIP_DB_PATH`. See
+[SELF-HOSTING.md](../../SELF-HOSTING.md#geoip) for the manual path.
 
 **The proxy is Coolify's, so the header rules are Traefik labels.** The stock
 install runs Caddy, which strips the headers a fronting proxy is supposed to own
