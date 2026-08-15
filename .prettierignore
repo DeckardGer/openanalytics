@@ -20,3 +20,8 @@ packages/contracts/src/cloud/generated/
 # The web app keeps the formatting conventions it was imported with (D-218);
 # it is linted by its own eslint-config-next setup, not the backend toolchain.
 apps/web/
+
+# Written by the CLA action on every signature, and rewritten on the next one.
+# Formatting it fails `format:check` on the bot's own commit, and fixing that
+# commit by hand only moves the failure to whoever signs next.
+.github/cla-signatures.json
