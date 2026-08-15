@@ -481,9 +481,10 @@ services:
   # the right environment because this writes an api-shaped user row and needs
   # the same database URL and auth secret the api uses.
   #
-  # Password sign-in is off by default; set AUTH_PASSWORD_SIGNIN=enabled in
-  # env/api.env and recreate the api to use the account this makes, then turn it
-  # back off once OAuth or mail works.
+  # The account this writes signs in with a password, so `env/api.env` has to
+  # carry AUTH_PASSWORD_SIGNIN=enabled — `env/api.env.example` already does, and
+  # says why it is not a bootstrap flag to switch back off afterwards. Recreate
+  # the api if you have just changed it.
   create-admin:
     image: ${OA_IMAGE_REPO:-openanalytics}/migrate:${OA_IMAGE_TAG:-local}
     profiles: ['tools']

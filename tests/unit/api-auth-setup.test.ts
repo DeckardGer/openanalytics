@@ -67,6 +67,33 @@ function stubAuth(record: Recorded, options: { signUpThrows?: boolean } = {}) {
 
 const oneUser = usersReturning([{ one: 1 }])
 
+/**
+ * A deployment that is empty when the guard reads it and claimed by the time
+ * the write fails — the race the duplicate branch exists for. Modelled rather
+ * than asserted from a thrown message, because which answer that branch owes
+ * is a question about the table and not about the error.
+ */
+const usersRacing = (record?: Recorded) => {
+  let reads = 0
+  return {
+    select: () => ({
+      from: () => ({
+        limit: async () => {
+          reads += 1
+          return reads === 1 ? [] : [{ one: 1 }]
+        },
+      }),
+    }),
+    update: () => ({
+      set: () => ({
+        where: async () => {
+          record?.verified.push('marked')
+        },
+      }),
+    }),
+  } as unknown as Database
+}
+
 /** The most recent app's log lines, so a test can assert what was written. */
 let captured = createCapturedLogger()
 
@@ -80,7 +107,13 @@ function buildApp(
   return createApp({
     service: createServiceMetadata({ name: 'api', version: '0.0.0-test', environment: 'test' }),
     logger,
-    env: loadServiceEnv('api', testEnv(options.overrides ?? {})),
+    // The account this route writes signs in with a password, so every test but
+    // the two that turn it off runs the configuration the route is documented
+    // for. `testEnv` leaves the variable unset, which is `disabled` — the
+    // hosted default — and before the guard below existed that meant the whole
+    // suite exercised a route whose write could not have worked on a real
+    // deployment.
+    env: loadServiceEnv('api', testEnv({ AUTH_PASSWORD_SIGNIN: 'enabled', ...options.overrides })),
     auth: stubAuth(record, options),
     db: users,
   })
@@ -160,12 +193,69 @@ describe('POST /v1/auth/setup', () => {
 
   it('reads a duplicate from Better Auth as the deployment being claimed', async () => {
     // Reachable despite the guard if two requests race. It is not a crash, and
-    // the caller is told the same thing the guard would have told them.
+    // the caller is told the same thing the guard would have told them — but
+    // only because the table says so by the time the answer is chosen.
+    const record = fresh()
+    const res = await post(buildApp(usersRacing(record), record, { signUpThrows: true }), GOOD)
+
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { code: string }).code).toBe('SETUP_COMPLETE')
+    expect(record.signIns).toEqual([])
+  })
+
+  it('does not claim an account exists when the write failed and none does', async () => {
+    // The branch above used to answer `409 SETUP_COMPLETE` for every failure,
+    // so a deployment with no account at all told the person claiming it that
+    // it already had one. The table is still empty here, and the answer says
+    // so.
     const record = fresh()
     const res = await post(buildApp(unclaimed(record), record, { signUpThrows: true }), GOOD)
 
-    expect(res.status).toBe(409)
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { code: string; message: string }
+    expect(body.code).toBe('SETUP_FAILED')
+    expect(body.message).not.toContain('already')
+    // The reason stays server-side: this route is unauthenticated and the
+    // failure can name an address.
+    expect(captured.find('setup_signup_refused')).toHaveLength(1)
+    expect(JSON.stringify(body)).not.toContain('@')
     expect(record.signIns).toEqual([])
+  })
+
+  it('refuses before anything else where the password door is not mounted', async () => {
+    // `signUpEmail` throws when Better Auth has not mounted the password
+    // endpoints, which is what `AUTH_PASSWORD_SIGNIN=disabled` means — and the
+    // default, because the same schema serves a hosted deployment where the
+    // doors are OAuth and the magic link. Self-host turns it on
+    // (`infra/selfhost/env/api.env.example`, `docker-compose.coolify.yml`), so
+    // reaching this is an install that wrote its own environment.
+    const record = fresh()
+    const res = await post(
+      buildApp(unclaimed(record), record, { overrides: { AUTH_PASSWORD_SIGNIN: 'disabled' } }),
+      GOOD,
+    )
+
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { code: string; message: string }
+    expect(body.code).toBe('PASSWORD_SIGNIN_DISABLED')
+    // The message names the variable to set. An operator reading it should not
+    // have to find this file.
+    expect(body.message).toContain('AUTH_PASSWORD_SIGNIN')
+    expect(record.signUps).toEqual([])
+  })
+
+  it('does not offer the password door it just refused', async () => {
+    // The refusal and the provider list have to agree: a login screen that
+    // draws the form from `/v1/auth/providers` must not be told the door
+    // exists by one endpoint and that it does not by the other.
+    const record = fresh()
+    const app = buildApp(unclaimed(record), record, {
+      overrides: { AUTH_PASSWORD_SIGNIN: 'disabled' },
+    })
+    const res = await app.fetch(new Request('https://api.test/v1/auth/providers'))
+    const body = (await res.json()) as { items: { id: string }[] }
+
+    expect(body.items.map((item) => item.id)).not.toContain('password')
   })
 
   /**

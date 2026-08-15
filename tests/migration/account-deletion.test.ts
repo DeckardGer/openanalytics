@@ -5,6 +5,7 @@ import {
   createDatabase,
   createPool,
   createSiteWithOwner,
+  deploymentOperatorUserId,
   finalizeAccountDeletion,
   listBilledSiteStates,
   listDeletionTargets,
@@ -1467,6 +1468,60 @@ describeIfPostgres('account deletion', () => {
       )
       expect(revived.rows[0]?.status).toBe('queued')
       expect(revived.rows[0]?.payload).toEqual({ deletion_request_id: first.deletionRequestId })
+    })
+  })
+
+  /**
+   * Who administers a self-hosted deployment, once somebody has been deleted.
+   *
+   * `deploymentOperatorUserId` is the oldest account, because migration 0043
+   * stores the SMTP password and the model-provider key against the deployment
+   * and there is no role above a site to ask. The rule collides with the one
+   * this file exists to prove: an erasure **scrubs** the `users` row into a
+   * tombstone rather than removing it, and leaves `created_at` alone, so the
+   * deleted account stays the oldest row forever.
+   *
+   * That needs a real database to be true at all. The purge above is one
+   * transaction judged by deferred triggers, and the tombstone survives a unique
+   * index; a stubbed `select().limit()` would prove only that the repository
+   * calls the function the test expects, which is exactly what the route-level
+   * suite already stubs.
+   *
+   * `created_at` is set explicitly rather than left to `now()`: the claim is
+   * about ordering, and two inserts a millisecond apart make it a claim about
+   * timing instead.
+   */
+  describe('the deployment operator, after a deletion', () => {
+    const makeUserAt = async (createdAt: string): Promise<string> => {
+      const id = newId()
+      await pool.query(
+        `INSERT INTO users (id, name, email, email_verified, created_at)
+         VALUES ($1, 'U', $2, true, $3)`,
+        [id, `${id}@example.com`, createdAt],
+      )
+      return id
+    }
+
+    it('moves to the oldest surviving account, not the tombstone that outranks it', async () => {
+      const first = await makeUserAt('2020-01-01T00:00:00Z')
+      const second = await makeUserAt('2021-01-01T00:00:00Z')
+
+      expect(await deploymentOperatorUserId(db)).toBe(first)
+
+      await purgeAccountPostgres(db, { userId: first })
+
+      // The row is still there and still the oldest — that is the whole reason
+      // this can go wrong.
+      const rows = await pool.query<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [
+        first,
+      ])
+      expect(rows.rows[0]?.email).toBe(accountTombstoneEmail(first))
+
+      // Without the filter this answers `first`: the role settles on an identity
+      // that can never sign in again, every live account reads `not_operator`,
+      // and the deployment's stored mail and model settings can never be edited
+      // or cleared from the dashboard again.
+      expect(await deploymentOperatorUserId(db)).toBe(second)
     })
   })
 })

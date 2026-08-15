@@ -52,18 +52,34 @@ import type { ApiVariables } from './middleware.ts'
  *
  * Since migration 0043 a self-hosted deployment keeps its SMTP password and its
  * model-provider key in `deployment_settings`, and the account allowed to read
- * and rewrite them is *derived*: `deploymentOperatorUserId` is the oldest
+ * and rewrite them is *derived*: `deploymentOperatorUserId` is the oldest live
  * account, because there is no role above a site to ask. Nothing anywhere grants
- * or moves that role — so deleting the oldest account does not remove the
- * operator, it **silently promotes the next-oldest one**, who may be a viewer on
- * a single site and who never agreed to hold a relay credential. The transfer is
- * invisible from both ends: no confirmation, no audit entry, no screen that
- * changes until somebody opens the settings tab and finds it editable.
+ * or moves that role, so it cannot be handed over — it can only be abandoned.
  *
- * So the operator cannot delete their own account, and the remedy is the one
- * this product already has for the same shape of problem — hand the thing over
- * first. Here that means clearing the stored settings, which returns the
- * deployment to its environment and makes the derived role worth nothing.
+ * **What deleting it would actually do**, since the first version of this
+ * comment and its commit message both got it wrong and the correction is worth
+ * keeping: not a silent promotion of the next-oldest account. An erasure scrubs
+ * the `users` row into a tombstone rather than removing it, and leaves
+ * `created_at` untouched, so the deleted account stays the oldest row forever.
+ * The role would stick to an identity that can never sign in again, every live
+ * account would read `not_operator`, and the stored relay password and model key
+ * could never be edited or cleared from the dashboard. A lockout, not a
+ * handover — worse than the failure first described, and refused either way.
+ * (`deploymentOperatorUserId` now skips tombstones, so a deployment that reached
+ * that state before this guard existed recovers on its next read.)
+ *
+ * So the account that claimed the deployment cannot delete itself here, and the
+ * refusal says exactly that. It deliberately does **not** offer clearing the
+ * stored settings as a way out: this guard compares identities and never reads
+ * `deployment_settings`, so clearing them changes nothing and the next attempt
+ * is refused identically. Naming a remedy that does not work is worse than
+ * naming none — it sends somebody to delete their own mail configuration for
+ * an answer that will not move.
+ *
+ * **The way out is the one self-hosting always has: the machine.** Whoever runs
+ * this deployment has a shell on it, and an owner account that has to change
+ * hands is a database edit today. Moving it from the dashboard needs a role
+ * system and an ADR, not a column added quietly here.
  *
  * **The guard fires only when `DEPLOYMENT_SETTINGS` is enabled, and that
  * restriction is the more important half.** A multi-tenant deployment sets it
@@ -110,7 +126,7 @@ export function createMeDeletionRoutes(deps: MeDeletionRoutesDeps): Hono<Env> {
       if (operator !== null && operator === user.id) {
         throw new ApiError(
           'ACCOUNT_DELETION_BLOCKED',
-          'This account administers the deployment. Clear its stored mail and assistant settings first, so the deployment falls back to its environment.',
+          'This is the account that claimed this deployment, and it administers it. The owner account cannot be deleted from the dashboard.',
           {
             // The same code the site holds use, because it is the same statement
             // — something depends on this account and must be dealt with first —

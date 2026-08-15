@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, ne, sql } from 'drizzle-orm'
 import type { Database } from '../client.ts'
 import { users } from '../schema/auth.ts'
 import { deploymentSettings, type DeploymentSettingScope } from '../schema/deployment-settings.ts'
@@ -126,12 +126,30 @@ export async function clearDeploymentSetting(
  * install needs more than one operator it needs a role system, and that is an
  * ADR rather than a column added quietly here.
  *
- * `null` on an empty deployment, which is the state the claim screen exists for.
+ * **Deleted accounts are skipped, and that is not a detail.** An erasure does
+ * not remove the `users` row — `purgeAccountPostgres` scrubs it into a
+ * tombstone (`deleted-{id}@tombstone.invalid`, ADR-0030 D8) and leaves
+ * `created_at` alone, because the row is what every foreign key still points
+ * at. So the oldest row can be an account nobody can sign into, and without
+ * this filter the operator role settles on it permanently: every live account
+ * reads `not_operator`, and the stored SMTP password and model-provider key can
+ * never be edited or cleared from the dashboard again. A deployment locked out
+ * of its own settings, with no error anywhere to say why.
+ *
+ * The predicate compares each row's address against the tombstone its own id
+ * would produce, rather than matching a pattern. `.invalid` is reserved and can
+ * hold no real mailbox, but an exact comparison needs no argument about that:
+ * the only address it excludes is the one this codebase writes.
+ *
+ * `null` on an empty deployment, which is the state the claim screen exists
+ * for — and now also on a deployment whose every account has been deleted,
+ * which is the same answer for the same reason: there is nobody to authorize.
  */
 export async function deploymentOperatorUserId(db: Database): Promise<string | null> {
   const [row] = await db
     .select({ id: users.id })
     .from(users)
+    .where(ne(users.email, sql`'deleted-' || ${users.id} || '@tombstone.invalid'`))
     .orderBy(asc(users.createdAt), asc(users.id))
     .limit(1)
   return row?.id ?? null

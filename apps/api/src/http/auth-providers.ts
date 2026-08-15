@@ -169,6 +169,25 @@ export function createAuthProviderRoutes(deps: AuthProviderDeps): Hono<Env> {
       )
     }
 
+    // The account this route writes signs in with a password, so the password
+    // endpoints have to exist. Refused here, by name, because the alternative
+    // was measured: `signUpEmail` throws when Better Auth has not mounted them,
+    // the catch below answered `SETUP_COMPLETE`, and a deployment with no
+    // account at all told the person claiming it that it already had one. The
+    // login screen only offers this form where `password` is in
+    // `GET /v1/auth/providers`, so reaching this is a stale page or a direct
+    // call — both of which deserve the real reason rather than a contradiction.
+    if (deps.env.AUTH_PASSWORD_SIGNIN !== 'enabled') {
+      return c.json(
+        {
+          code: 'PASSWORD_SIGNIN_DISABLED',
+          message:
+            'This deployment does not offer password sign-in, so the first account cannot be created here. Set AUTH_PASSWORD_SIGNIN=enabled on the api and restart it.',
+        },
+        503,
+      )
+    }
+
     const window = deps.setupRateLimiter.check(`setup-ip:${clientAddress(c.req.raw)}`)
     if (!window.allowed) {
       return c.json({ code: 'RATE_LIMITED', message: 'Too many attempts.' }, 429, {
@@ -216,14 +235,29 @@ export function createAuthProviderRoutes(deps: AuthProviderDeps): Hono<Env> {
     try {
       await auth.api.signUpEmail({ body: { email, password, name } })
     } catch (err) {
-      // A duplicate is reachable despite the guard if two requests race. It is
-      // not a crash, and it is not this caller's business which address exists.
+      // The reason goes to the log, never to the caller — this route is
+      // unauthenticated and the failure can name an address.
       deps.logger.warn('setup_signup_refused', {
         reason: err instanceof Error ? err.message : 'unknown',
       })
+      // Which answer is true is a question about the table, not about the
+      // error: a duplicate is reachable despite the guard if two requests
+      // race, and then the deployment really does have an account. Anything
+      // else — a database that went away mid-request, a rejection from Better
+      // Auth — leaves it empty, and telling that caller "you already have an
+      // account" is the lie this branch used to tell unconditionally.
+      if (!(await setupRequired())) {
+        return c.json(
+          { code: 'SETUP_COMPLETE', message: 'This deployment already has an account.' },
+          409,
+        )
+      }
       return c.json(
-        { code: 'SETUP_COMPLETE', message: 'This deployment already has an account.' },
-        409,
+        {
+          code: 'SETUP_FAILED',
+          message: 'The first account could not be created. The api log has the reason.',
+        },
+        503,
       )
     }
 

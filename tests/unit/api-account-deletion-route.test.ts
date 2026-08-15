@@ -224,12 +224,14 @@ describe('DELETE /v1/me', () => {
  *
  * Since migration 0043 a self-hosted deployment keeps its SMTP password and its
  * model-provider key in `deployment_settings`, and the account authorized to
- * read and rewrite them is *derived* — the oldest one. Nothing grants or moves
- * that role, so deleting the oldest account promotes the next-oldest silently:
- * possibly a viewer on one site, who never agreed to hold a relay credential.
+ * read and rewrite them is *derived* — the oldest live one. Nothing grants or
+ * moves that role, so it cannot be handed over. Deleting it would not transfer
+ * it either: an erasure scrubs the `users` row into a tombstone rather than
+ * removing it, so the role would stick to an identity nobody can sign into and
+ * the deployment's own settings would become permanently uneditable.
  *
  * Both directions are pinned here because getting either wrong is invisible.
- * A missing guard hands the deployment's credentials to a stranger; a guard that
+ * A missing guard locks a deployment out of its own credentials; a guard that
  * fires where the role does not exist denies a paying customer the erasure
  * ADR-0057 committed to — which is the worse of the two, and the reason the flag
  * is checked before the identity is even looked up.
@@ -249,9 +251,18 @@ describe('DELETE /v1/me — the deployment operator', () => {
     // message rather than rendering an empty "these sites are blocking" list.
     expect(body.error.details['reason']).toBe('deployment_operator')
     expect(body.error.details['blocking_sites']).toBeUndefined()
-    // The remedy has to be in the refusal; "you cannot" with no next step is
-    // where an operator gives up and edits the database by hand.
-    expect(body.error.message).toContain('settings')
+    // The refusal must not name a remedy that does not work. It used to tell
+    // the caller to clear the stored mail and assistant settings first — but
+    // this guard compares identities and never reads `deployment_settings`, so
+    // clearing them changes nothing and the next attempt is refused
+    // identically. A false next step is worse than none: it sends somebody to
+    // delete their own mail configuration for an answer that will not move.
+    expect(body.error.message).not.toMatch(/clear/iu)
+    expect(body.error.message).not.toMatch(/settings/iu)
+    // What it does say: which account this is, and that the dashboard is not
+    // where it changes hands.
+    expect(body.error.message).toMatch(/claimed this deployment/iu)
+    expect(body.error.message).toMatch(/cannot be deleted/iu)
     expect(calls.startAccountDeletion).toEqual([])
   })
 

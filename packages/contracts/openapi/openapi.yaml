@@ -246,11 +246,20 @@ paths:
         '400':
           description: The address or the password was rejected.
         '409':
-          description: This deployment already has an account.
+          description: |
+            This deployment already has an account (`SETUP_COMPLETE`). Answered
+            only when the users table is non-empty — including when a race made
+            it so between the guard and the write.
         '429':
           description: Too many attempts from this address.
         '503':
-          description: This deployment has no auth database.
+          description: |
+            This deployment cannot create an account this way. `NOT_CONFIGURED`
+            — no auth database; `PASSWORD_SIGNIN_DISABLED` — the account this
+            route writes signs in with a password and `AUTH_PASSWORD_SIGNIN` is
+            not `enabled`, so those endpoints are not mounted;
+            `SETUP_FAILED` — the write was refused and the deployment still has
+            no account, with the reason in the api log.
 
   /v1/deployment/settings:
     get:
@@ -523,16 +532,22 @@ paths:
 
         **A third hold exists only on a self-hosted deployment.** Where
         `DEPLOYMENT_SETTINGS` is enabled, the account that administers the
-        deployment — the oldest one, which is what the deployment settings
-        surface authorizes against — cannot delete itself: the role is derived
-        rather than granted, so removing that account would silently move the
-        stored SMTP password and model-provider key to whoever is next-oldest.
-        The refusal is `409 ACCOUNT_DELETION_BLOCKED` carrying
-        `details.reason: 'deployment_operator'` and **no** `blocking_sites`, and
-        the remedy is to clear the stored settings first
-        (`DELETE /v1/deployment/settings/{scope}`), which returns the deployment
-        to its environment. It is checked ahead of the re-authentication and the
-        confirmation, because proving intent does not change the answer.
+        deployment — the oldest live one, which is what the deployment settings
+        surface authorizes against — cannot delete itself. The role is derived
+        rather than granted, so it cannot be handed over, and deleting it would
+        not move it: an erasure scrubs the `users` row into a tombstone rather
+        than removing it and leaves `created_at` alone, so the role would stick
+        to an identity that can never sign in again and the stored SMTP password
+        and model-provider key could never be edited or cleared from the
+        dashboard. The refusal is `409 ACCOUNT_DELETION_BLOCKED` carrying
+        `details.reason: 'deployment_operator'` and **no** `blocking_sites`. It
+        is checked ahead of the re-authentication and the confirmation, because
+        proving intent does not change the answer.
+
+        **There is no API remedy, and the refusal does not claim one.** This hold
+        compares identities and never reads `deployment_settings`, so clearing
+        the stored settings does not lift it. Moving an owner account is a
+        database edit on the host that runs the deployment.
 
         This hold does not exist where `DEPLOYMENT_SETTINGS` is disabled. There
         the oldest account is only the first that signed up, nothing is stored
