@@ -29,7 +29,7 @@ its own guesses. Three of them are wrong for this stack:
 | -------------- | --------------- | --------------------- |
 | Build Pack     | `railpack`      | **Docker Compose**    |
 | Base Directory | `/`             | **`/infra/selfhost`** |
-| Branch         | `main`          | a release tag, later  |
+| Branch         | `main`          | leave it, see below   |
 
 Changing the build pack replaces "output type" and "port" with **Docker Compose
 Location**. That field defaults to `/docker-compose.yaml` and must become:
@@ -42,10 +42,18 @@ Type it carefully. Every character is load-bearing and the error it produces is
 the same one for all of them: `Docker Compose file not found at ...`. The name
 has one dot before `coolify`, the extension is `.yml` and not `.yaml`.
 
-**The branch cannot be set here.** Coolify says so: it takes `main` and lets you
-change it after the first deploy. Both work, because `main` and the newest tag
-carry the same compose file, but a tag is what keeps the tree and the images one
-version. Change it in **Settings** once the resource exists.
+**The branch is `main` and there is nowhere to change it.** Coolify says as much
+on the create screen, and on 4.3.2 the field does not appear afterwards either.
+It does not matter, and the reason is worth knowing rather than working around:
+**the images are pinned in the compose file, not by the checkout.** Every
+`image:` line here reads `${OA_IMAGE_TAG:-v0.4.1}`, so a clone of `main` runs
+the release named in the file it just cloned. What a tag would add is that the
+env templates and the migrations come from the same commit as well; `main`
+carries them too, right up until the next change lands on it.
+
+If you want the tree pinned as well, set `OA_IMAGE_TAG` in the environment
+variables to the release you mean and redeploy after each release rather than on
+every push.
 
 ## 2. Domains, one per service
 
@@ -89,10 +97,17 @@ dig +short app.<domain> A
 
 ## 3. Environment variables
 
-**Environment Variables** in the left menu. Twenty-one of them are already
-filled: every password, every base64 secret, every FQDN. Do not touch those. The
-three signing key pairs are not there and do not need to be, because a one-shot
-step inside the stack makes them.
+**Environment Variables** in the left menu. Most of them are already filled:
+every password, every base64 secret, every FQDN. Do not touch those.
+
+**Two things are deliberately not there.** The three signing key pairs, and the
+credential keyring that encrypts connected provider credentials. A one-shot step
+inside the stack makes both and hands them over as files, because no generator
+on this platform can produce either: a keypair whose halves must match across two
+services is not a random string, and the keyring needs exactly 32 bytes while
+`SERVICE_BASE64_` gives 32 base64 _characters_, which is 24. That last one is
+not hypothetical. It is what shipped through v0.4.0, and it left every install
+without an **Account → Deployment** tab.
 
 **Coolify keeps two copies of every variable: `Production` and `Preview`.** They
 are two rows with the same name, and the list does not make the difference

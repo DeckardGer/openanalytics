@@ -15,8 +15,8 @@ import { Hono } from 'hono'
  *
  * The one-click platforms are where it is not. Coolify and Openship terminate at
  * their own proxy, which routes a hostname to a container and serves no files of
- * its own, so on those installs the snippet the dashboard hands out —
- * `<script src="${COLLECTOR_BASE_URL}/oa.js">` — answered `404` from v0.3.0
+ * its own, so on those installs the snippet the dashboard hands out,
+ * `<script src="${COLLECTOR_BASE_URL}/oa.js">`, answered `404` from v0.3.0
  * until this existed. The dashboard worked, the api worked, ingest worked, and
  * the one file a customer actually pastes could not load.
  *
@@ -94,8 +94,8 @@ function detach(view: Buffer): ArrayBuffer {
  * dashboard prints and in every doc page. Not under `/v1`: this is a file a
  * customer pastes, not part of the versioned ingest contract.
  *
- * `Access-Control-Allow-Origin` is not set here — `publicIngestCors` already
- * puts `*` on every response from this service. A classic `<script src>` is not
+ * `Access-Control-Allow-Origin` is not set here, because `publicIngestCors`
+ * already puts `*` on every response from this service. A classic `<script src>` is not
  * a CORS request and needs none of it, but a site owner who adds `crossorigin`
  * gets real messages in `window.onerror` instead of "Script error.".
  */

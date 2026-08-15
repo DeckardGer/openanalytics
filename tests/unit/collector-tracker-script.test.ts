@@ -16,7 +16,7 @@ import { createApp, readTrackerScript } from '../../apps/collector/src/index.ts'
  * Dockerfile's `build` stage, that stage did not carry `scripts/`, and
  * `pnpm run tracker:build` is `node scripts/build-tracker.mjs`. With no command
  * of its own the container inherited a bare `node`, read EOF from a closed
- * stdin, exited 0 and wrote nothing — a one-shot reporting success while the
+ * stdin, exited 0 and wrote nothing, a one-shot reporting success while the
  * shared volume stayed empty. Nothing would have served the file either: the
  * collector mounted no static route, and the platform variants have no Caddy.
  * Meanwhile the dashboard hands every new site

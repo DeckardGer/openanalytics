@@ -381,7 +381,15 @@ describe('the Coolify variant against the env templates', () => {
       expect(wanted.size).toBeGreaterThan(0)
 
       for (const [key, value] of wanted) {
-        expect(declared.has(key), `${service} is missing ${key}`).toBe(true)
+        // `X_FILE` satisfies `X`. ADR-0065 D1 makes a path another way to supply
+        // any declared variable, and D4 makes supplying both an error, so the
+        // two spellings are alternatives, and a check that demanded the inline
+        // one would force the wrong fix on a value the platform cannot express.
+        // The keyring is exactly that case: it wants 32 bytes and Coolify's
+        // generators produce 24, 48 or 96.
+        const byPath = declared.has(`${key}_FILE`)
+        expect(declared.has(key) || byPath, `${service} is missing ${key}`).toBe(true)
+        if (byPath) continue
 
         // Only literals are comparable. A template placeholder and a
         // `${SERVICE_PASSWORD_*}` are the same intent spelled for two different
