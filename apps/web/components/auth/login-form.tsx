@@ -431,8 +431,14 @@ export function LoginForm({
   };
 
   /**
-   * Signs in with a password, where the deployment offers one. Self-hosted
-   * installs turn this on by default; the hosted one never does.
+   * Signs in with a password, where the deployment offers one.
+   *
+   * `AUTH_PASSWORD_SIGNIN` defaults to `disabled` everywhere, written for the
+   * hosted product. What turns it on is the self-host configuration rather than
+   * the code: `env/api.env.example` ships it enabled and both platform compose
+   * files set it. So this is a normal door on an install that runs on its
+   * owner's hardware, and absent on the hosted one, which is the same outcome
+   * the old comment described and not the same mechanism.
    */
   const signInWithPassword = async (event: React.FormEvent) => {
     event.preventDefault();

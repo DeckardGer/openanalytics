@@ -13,8 +13,19 @@ not a promise. What it is no longer is a file nobody has run.
 - **Four DNS records**, all pointing at that server. The dashboard, the api, the
   collector and the realtime stream are four hostnames, not four paths. See
   [SELF-HOSTING.md](../../SELF-HOSTING.md#four-names-and-why-it-is-four) for why.
-- About 4 GB of RAM for the stack, on top of whatever Coolify itself uses, and
-  10 GB of disk for the images.
+- About 4 GB of RAM for the stack, on top of whatever Coolify itself uses.
+- **25 GB of free disk**, or 15 GB and one command before each upgrade. A release
+  is about 13 GB of images, and Coolify pulls the new set before it releases the
+  old one, so an upgrade holds two generations at once. Measured on a 38 GB box:
+  it installed cleanly, upgraded once, and ran out during the second, part-way
+  through extracting a layer. The error names a file inside `node_modules` and
+  never names the disk.
+
+  On the smaller box, clear the previous release first:
+
+  ```sh
+  docker image prune -a -f      # keeps whatever the running containers use
+  ```
 
 ## 1. Create the resource
 

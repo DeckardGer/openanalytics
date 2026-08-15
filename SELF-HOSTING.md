@@ -11,8 +11,10 @@ Two ways in:
   services into infrastructure you already run.
 
 Requirements for the compose path: a Linux host with Docker and the Compose
-plugin, four DNS records pointing at it, and about 4 GB of RAM. Everything else
-is built from this repository.
+plugin, four DNS records pointing at it, about 4 GB of RAM and **25 GB of free
+disk**. A release is about 13 GB of images, and an upgrade holds two generations
+at once until the old one is cleared, which is where the second figure comes
+from. Everything else is built from this repository.
 
 ---
 
@@ -643,6 +645,16 @@ git fetch --tags
 git checkout v0.4.2            # the release you are moving to
 cd infra/selfhost
 ./upgrade.sh                   # tells you what it costs, then does it
+```
+
+**On a box with less than 25 GB free, clear the previous release first.** The new
+images are pulled before the old ones are released, so the upgrade briefly needs
+room for two generations of about 13 GB each. Without it the pull fails part-way
+through extracting a layer, with `no space left on device` naming a file inside
+`node_modules` and nothing naming the disk:
+
+```sh
+docker image prune -a -f       # keeps whatever the running containers use
 ```
 
 Run it from the **new** checkout: the script that performs an upgrade ships with

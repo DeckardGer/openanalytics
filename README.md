@@ -72,8 +72,8 @@ Architecture rules CI enforces, not conventions:
 
 **[SELF-HOSTING.md](SELF-HOSTING.md)** is the guide: a generator script, one
 `docker compose up -d`, automatic TLS, and an explanation of every secret and
-every failure mode. Requirements are a Linux host with Docker, four DNS records
-and about 4 GB of RAM.
+every failure mode. Requirements are a Linux host with Docker, four DNS records,
+about 4 GB of RAM and 25 GB of free disk.
 
 **Installing is a pull, not a build.** A release publishes ten images to
 `ghcr.io/openlabs-so/openanalytics`, so a fresh host is a few minutes and needs
