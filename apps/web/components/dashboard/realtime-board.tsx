@@ -705,14 +705,36 @@ export function RealtimeBoard() {
       ? (visitors.find((visitor) => visitor.hash === activeHash)?.events[0]
           ?.event_id ?? null)
       : null;
-  const [trail, setTrail] = React.useState<{
-    hash: string;
+  type TrailEntry = {
     sessions: readonly VisitorSession[];
     /** CP7's owner-only additions; `?? null`/`?? []` because they are
      * optional by absence, and absence must render as nothing. */
     revenue: VisitorRevenue | null;
     revenueEvents: readonly RevenueJourneyEntry[];
-  } | null>(null);
+  };
+  /**
+   * Answered trails, kept per visitor rather than one slot.
+   *
+   * With a single slot, every switch to a different visitor started from
+   * nothing: `trailLoaded` went false, the skeleton painted, and on a fast
+   * api the answer landed ~150 ms later — a blink on every open. The file
+   * already refuses to blink on the refresh paths (the 30 s bucket and a
+   * fresh live event overwrite the old answer only when the new one lands);
+   * this extends the same rule to switching visitors. A visitor opened
+   * before shows their last answer instantly and the refetch below revises
+   * it silently; the skeleton is left meaning what it says, a visitor this
+   * session has never answered for.
+   *
+   * The loading-versus-empty doctrine is untouched: an answered-and-empty
+   * trail is cached as `sessions: []`, which is loaded, not loading.
+   * Bounded because a realtime board can be clicked through all evening;
+   * past the cap the oldest entry leaves, and a re-answered visitor is
+   * re-inserted so recency is what the order tracks.
+   */
+  const TRAIL_CACHE_LIMIT = 20;
+  const [trails, setTrails] = React.useState<ReadonlyMap<string, TrailEntry>>(
+    () => new Map()
+  );
   React.useEffect(() => {
     // The refresh bucket retires this effect every 30 s while the modal is
     // open, and a new live event retires it immediately; the fetch itself
@@ -733,11 +755,22 @@ export function RealtimeBoard() {
           { signal: controller.signal }
         );
         if (!cancelled) {
-          setTrail({
-            hash: activeHash,
-            sessions: response.sessions,
-            revenue: response.revenue ?? null,
-            revenueEvents: response.revenue_events ?? [],
+          setTrails((previous) => {
+            const next = new Map(previous);
+            // Delete-then-set so a refreshed visitor moves to the young end;
+            // the eviction below trims from the old end.
+            next.delete(activeHash);
+            next.set(activeHash, {
+              sessions: response.sessions,
+              revenue: response.revenue ?? null,
+              revenueEvents: response.revenue_events ?? [],
+            });
+            while (next.size > TRAIL_CACHE_LIMIT) {
+              const oldest = next.keys().next().value;
+              if (oldest === undefined) break;
+              next.delete(oldest);
+            }
+            return next;
           });
         }
       } catch {
@@ -750,10 +783,8 @@ export function RealtimeBoard() {
       controller.abort();
     };
   }, [slug, activeHash, trailRefresh, newestLiveEventId]);
-  const serverSessions =
-    active !== null && trail !== null && trail.hash === active.hash
-      ? trail.sessions
-      : null;
+  const trail = active !== null ? (trails.get(active.hash) ?? null) : null;
+  const serverSessions = trail !== null ? trail.sessions : null;
   /**
    * The modal's revenue facts. The trail's own answer wins (same window,
    * same read as the sessions on screen); until it lands, the row marker
@@ -764,15 +795,10 @@ export function RealtimeBoard() {
   const activeRevenue =
     active === null
       ? null
-      : ((trail !== null && trail.hash === active.hash
-          ? trail.revenue
-          : null) ??
+      : ((trail !== null ? trail.revenue : null) ??
         revenueByHash.get(active.hash) ??
         null);
-  const activeRevenueEvents =
-    active !== null && trail !== null && trail.hash === active.hash
-      ? trail.revenueEvents
-      : [];
+  const activeRevenueEvents = trail !== null ? trail.revenueEvents : [];
   /**
    * "No sessions yet" and "not answered yet" are different facts. Until the
    * trail read resolves for *this* hash, the journey band shows a
