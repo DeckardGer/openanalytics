@@ -1292,7 +1292,23 @@ export function RealtimeBoard() {
                             null
                           ) : null}
                           {sessionsForModal.map((session, index) => (
-                            <motion.div key={session.id} variants={MODAL_ITEM}>
+                            // The newest card is keyed by its *slot*, not by
+                            // its session id, and that is what stops an
+                            // online visitor's modal from blinking. Before
+                            // the trail answers, this slot holds the live
+                            // feed's own pages under the id `current`; when
+                            // the answer lands it becomes a real session id.
+                            // Keyed by id, that swap unmounted the card and
+                            // mounted another, replaying the enter animation
+                            // a beat after the modal opened. Keyed by slot,
+                            // the same card takes on the fuller history in
+                            // place. The rest keep their real ids, so a
+                            // session that arrives later still animates in
+                            // as the new thing it is.
+                            <motion.div
+                              key={index === 0 ? "current-session" : session.id}
+                              variants={MODAL_ITEM}
+                            >
                               {/* overview-card anatomy: squircle frame, meta
                                   in the top strip, pageviews on the inset
                                   panel; newest page sits on top */}
