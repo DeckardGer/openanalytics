@@ -41,11 +41,11 @@ export const MOCK_SITES: SiteSummary[] = [
   {
     site_id: "019f8740-2b3c-7a10-9c1d-4e5f6a7b8c9d",
     slug: "openanalytics",
-    name: "openanalytics.io",
+    name: "getopen.so",
     status: "active",
     role: "owner",
     is_billing_owner: true,
-    domains: ["openanalytics.io"],
+    domains: ["getopen.so"],
     created_at: "2025-11-04T09:12:00.000Z",
     // Data has flowed: onboarding's "tracker installed" step is done.
     first_event_at: "2025-11-04T09:41:07.000Z",
