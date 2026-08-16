@@ -1277,17 +1277,19 @@ export function RealtimeBoard() {
                                 last 24 hours. Presence is refreshed by any
                                 activity, so somebody can be here without one.
                               </motion.p>
-                            ) : (
-                              // Not answered yet — a placeholder card, so an
-                              // empty band is never mistaken for "no history".
-                              <motion.div variants={MODAL_ITEM}>
-                                <div className="flex flex-col gap-2.5 rounded-[24px] border border-border bg-card p-4 sm:rounded-[36px]">
-                                  <SkeletonBar className="h-3.5 w-28" />
-                                  <SkeletonBar className="h-3 w-44" />
-                                  <SkeletonBar className="h-3 w-32" />
-                                </div>
-                              </motion.div>
-                            )
+                            ) : // Not answered yet: nothing at all, on
+                            // purpose. A placeholder card used to stand here
+                            // so an empty band could not be read as "no
+                            // history" — but the sentence above is what makes
+                            // that claim, and it is already gated on the
+                            // answer, so silence cannot be mistaken for it.
+                            // What the placeholder did instead was blink: it
+                            // animated in, and 150-300 ms later the real
+                            // cards animated in over it, on every first open
+                            // of a visitor. Saying nothing for one beat is
+                            // quieter than saying something false-looking
+                            // twice.
+                            null
                           ) : null}
                           {sessionsForModal.map((session, index) => (
                             <motion.div key={session.id} variants={MODAL_ITEM}>
