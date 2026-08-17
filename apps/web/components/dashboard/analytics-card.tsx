@@ -12,6 +12,7 @@ import {
 import { HoverRow } from "@/components/dashboard/hover-list";
 import { useAnalyticsInterval } from "@/components/dashboard/interval-context";
 import { SkeletonReveal } from "@/components/ui/skeleton-reveal";
+import { useSquircleCardHeaderChip } from "@/components/ui/squircle-card";
 import { useApiResource, type ApiResource } from "@/hooks/use-api-resource";
 import {
   LIVE_API,
@@ -108,6 +109,41 @@ export function AnalyticsCardBody<
   emptyBody: React.ReactNode;
   children: (data: T) => React.ReactNode;
 }) {
+  const setHeaderChip = useSquircleCardHeaderChip();
+
+  const data = resource.status === "ready" ? resource.data : null;
+  const empty = data !== null && isEmpty(data);
+  const state = data === null ? null : dataStateOf(data.meta, empty);
+
+  // The freshness chip rides beside the card's TITLE ("Browsers · Catching
+  // up"), through the shell's header slot — a caveat about the whole card
+  // belongs on the card's name, not floating over its first data row. Only
+  // while rows are actually shown: the empty flavours explain freshness in
+  // the panel itself, and a second marker above it would say it twice.
+  // Registered from an effect keyed on the two primitives, so a render whose
+  // chip is unchanged never re-registers.
+  const chipKind =
+    data !== null &&
+    !empty &&
+    state !== null &&
+    (state.kind === "stale" || state.kind === "degraded")
+      ? state.kind
+      : null;
+  const chipWatermark = state?.kind === "stale" ? state.watermark : null;
+  React.useEffect(() => {
+    if (setHeaderChip === null || chipKind === null) return;
+    setHeaderChip(
+      <FreshnessChip
+        state={
+          chipKind === "stale"
+            ? { kind: "stale", watermark: chipWatermark }
+            : { kind: "degraded" }
+        }
+      />
+    );
+    return () => setHeaderChip(null);
+  }, [setHeaderChip, chipKind, chipWatermark]);
+
   if (resource.status === "error") {
     return (
       <ApiErrorPanel
@@ -120,10 +156,7 @@ export function AnalyticsCardBody<
 
   const ready = resource.status === "ready";
   let body: React.ReactNode = null;
-  if (ready) {
-    const data = resource.data;
-    const empty = isEmpty(data);
-    const state = dataStateOf(data.meta, empty);
+  if (data !== null && state !== null) {
     body = empty ? (
       // `state` here is empty/stale/degraded, never ok — isEmpty forces it.
       <DataStatePanel
@@ -132,16 +165,13 @@ export function AnalyticsCardBody<
       />
     ) : (
       <>
-        {/* One strip for both kinds of caveat: how current the numbers are,
-            and where they came from. Provenance is read per response — the
-            same card is `['live']` on one range and `['live','imported']` on
-            the next — so it cannot be hoisted to the screen. */}
-        {state.kind === "stale" ||
-        state.kind === "degraded" ||
-        data.meta.accuracy !== "exact" ||
+        {/* Provenance only — freshness moved up beside the title. Provenance
+            is read per response — the same card is `['live']` on one range
+            and `['live','imported']` on the next — so it cannot be hoisted
+            to the screen. */}
+        {data.meta.accuracy !== "exact" ||
         data.meta.data_sources.includes("imported") ? (
           <div className="flex flex-wrap justify-end gap-1.5 px-3 pb-1">
-            <FreshnessChip state={state} />
             <ProvenanceChips meta={data.meta} />
           </div>
         ) : null}

@@ -9,7 +9,5 @@
     "website": "https://getopen.so",
     "docs": "https://github.com/OpenLabs-so/openanalytics/blob/main/infra/selfhost/DOKPLOY.md"
   },
-  "tags": [
-    "analytics"
-  ]
+  "tags": ["analytics"]
 }

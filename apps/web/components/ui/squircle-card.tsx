@@ -49,6 +49,25 @@ export function SquircleSurface({
   });
 }
 
+/**
+ * The header's chip slot. A card body knows things about its data the shell
+ * cannot — chiefly whether the numbers are behind — and the place to say so
+ * is beside the title ("Browsers · Catching up"), not somewhere over the
+ * rows. The body cannot render into the header from below, so the shell
+ * offers a setter: register a node and the header shows it, aligned on the
+ * title's own centreline; clear it (or unmount) and the header is clean.
+ */
+const HeaderChipContext = React.createContext<
+  ((chip: React.ReactNode) => void) | null
+>(null);
+
+/** `null` outside a `SquircleCard` — callers must tolerate having no slot. */
+export function useSquircleCardHeaderChip():
+  | ((chip: React.ReactNode) => void)
+  | null {
+  return React.useContext(HeaderChipContext);
+}
+
 type SquircleCardProps = {
   /** Header label shown in the frame's top strip */
   title: React.ReactNode;
@@ -92,6 +111,7 @@ export function SquircleCard({
   className,
   contentClassName,
 }: SquircleCardProps): React.ReactElement {
+  const [headerChip, setHeaderChip] = React.useState<React.ReactNode>(null);
   const seeAllClassName =
     "group/seeall flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 hover:bg-accent/60 hover:text-foreground";
   const seeAllBody = (
@@ -112,10 +132,18 @@ export function SquircleCard({
       )}
     >
       <div className="flex items-center justify-between gap-2 pb-2 pl-3.5 pr-2 pt-1.5">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-foreground/80 ml-1 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground">
-          {icon}
-          {title}
-        </h2>
+        {/* Title and chip share one centreline on purpose: the chip is part
+            of the title's statement ("Browsers, catching up"), so it may not
+            ride higher or lower than the words it qualifies. It sits outside
+            the h2 so the heading's svg sizing never reaches the badge's own
+            icon disc. */}
+        <div className="ml-1 flex min-w-0 items-center gap-2">
+          <h2 className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground/80 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground">
+            {icon}
+            {title}
+          </h2>
+          {headerChip}
+        </div>
         {hideSeeAll ? null : onSeeAll ? (
           <button
             type="button"
@@ -141,7 +169,9 @@ export function SquircleCard({
           contentClassName,
         )}
       >
-        {children}
+        <HeaderChipContext.Provider value={setHeaderChip}>
+          {children}
+        </HeaderChipContext.Provider>
       </SquircleSurface>
     </SquircleSurface>
   );

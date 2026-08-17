@@ -6,6 +6,11 @@ import {
   TriangleAlertIcon,
 } from "@/components/icons/hugeicons";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { AnalyticsMeta, FreshnessState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -140,7 +145,13 @@ export function DataStatePanel({
 
 /**
  * A quiet inline marker for panels that still have numbers worth showing but
- * whose numbers are behind. Sits next to a card title, not over the data.
+ * whose numbers are behind. Sits beside the card's title — `SquircleCard`'s
+ * header slot is where `AnalyticsCardBody` places it — never over the data.
+ *
+ * The explanation is a real tooltip, not a `title` attribute: the chip is two
+ * words, the tooltip is the only place those words are explained, and the
+ * native delay (~1 s, browser-styled) read as "no tooltip" to anyone who did
+ * not linger. `delay={100}` is the point, not a flourish.
  */
 export function FreshnessChip({
   state,
@@ -152,21 +163,33 @@ export function FreshnessChip({
   if (state.kind === "ok" || state.kind === "empty") return null;
   const latest = state.kind === "stale" ? relativeTime(state.watermark) : null;
   return (
-    <Badge
-      className={className}
-      icon={
-        state.kind === "stale" ? <CloudSlowWindIcon /> : <TriangleAlertIcon />
-      }
-      size="sm"
-      title={
-        state.kind === "stale"
-          ? `The pipeline is behind; these numbers are not current.${latest ? ` Latest data ${latest}.` : ""}`
-          : "Freshness could not be confirmed."
-      }
-      variant="warning"
-    >
-      {state.kind === "stale" ? "Catching up" : "Unverified"}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger
+        delay={100}
+        render={
+          <Badge
+            className={className}
+            icon={
+              state.kind === "stale" ? (
+                <CloudSlowWindIcon />
+              ) : (
+                <TriangleAlertIcon />
+              )
+            }
+            size="sm"
+            variant="warning"
+          >
+            {state.kind === "stale" ? "Catching up" : "Unverified"}
+          </Badge>
+        }
+      />
+      {/* The same sentences the full-panel state uses (`COPY`), so the chip
+          and the panel can never explain the same state two ways. */}
+      <TooltipPopup className="max-w-60">
+        {COPY[state.kind].body}
+        {latest ? ` Latest data ${latest}.` : null}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 

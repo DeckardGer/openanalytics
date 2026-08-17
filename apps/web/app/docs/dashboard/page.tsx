@@ -55,10 +55,10 @@ export default function DashboardDocsPage() {
 
       <DocSection title="Freshness">
         <DocNote>
-          Events typically land in charts within seconds. When the chip in
-          the corner says Catching up, the pipeline is behind and the charts
-          are honest about it; a site with no traffic simply shows its last
-          visit&apos;s age. For the current moment, the{" "}
+          Events typically land in charts within seconds. When the chip
+          beside a card&apos;s title says Catching up, the pipeline is behind
+          and the charts are honest about it; a site with no traffic simply
+          shows its last visit&apos;s age. For the current moment, the{" "}
           <DocLink slug="realtime">realtime view</DocLink> is the faster
           surface.
         </DocNote>
