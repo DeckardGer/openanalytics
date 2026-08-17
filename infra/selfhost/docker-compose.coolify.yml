@@ -236,8 +236,8 @@ services:
       - -ec
       - |
         apk add --no-cache openssl >/dev/null
-        mkdir -p /keys/api /keys/gateway /keys/realtime /keys/collector /keyring
-        for entry in "query gateway" "realtime realtime" "preview collector"; do
+        mkdir -p /keys/api /keys/gateway /keys/realtime /keyring
+        for entry in "query gateway" "realtime realtime"; do
           set -- $$entry
           pair=$$1
           dest=$$2
@@ -268,15 +268,14 @@ services:
         # uid 1000 is `node` in the runtime image, which is the user every
         # service runs as.
         chown -R 1000:1000 /keys /keyring
-        chmod 700 /keys/api /keys/gateway /keys/realtime /keys/collector /keyring
+        chmod 700 /keys/api /keys/gateway /keys/realtime /keyring
         chmod 400 /keys/api/*.pem /keyring/credential-keyring.json
-        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem /keys/collector/*.pem
-        ls -l /keys/api /keys/gateway /keys/realtime /keys/collector /keyring
+        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem
+        ls -l /keys/api /keys/gateway /keys/realtime /keyring
     volumes:
       - keys-api:/keys/api
       - keys-gateway:/keys/gateway
       - keys-realtime:/keys/realtime
-      - keys-collector:/keys/collector
       - keyring:/keyring
 
   # --- one-shot: the geo database -------------------------------------------
@@ -462,7 +461,6 @@ services:
       AUTH_PASSWORD_SIGNIN: enabled
       QUERY_SIGNING_PRIVATE_KEY_FILE: /keys/query.private.pem
       REALTIME_TOKEN_SIGNING_KEY_FILE: /keys/realtime.private.pem
-      PREVIEW_TOKEN_SIGNING_KEY_FILE: /keys/preview.private.pem
     volumes:
       - keys-api:/keys:ro
       - keyring:/keyring:ro
@@ -505,7 +503,6 @@ services:
       REALTIME_CACHE_REDIS_URL: redis://:${SERVICE_PASSWORD_VALKEYREALTIME}@valkey-realtime:6379
       ANONYMOUS_IDENTITY_SECRET: ${SERVICE_BASE64_64_ANONIDENTITY}
       ANONYMOUS_IDENTITY_KEY_VERSION: 1
-      PREVIEW_TOKEN_VERIFY_KEY_FILE: /keys/preview.public.pem
       # Set, because the `geoip` one-shot above guarantees the file: it is a hard
       # dependency below, so this path names a database or the deploy stopped
       # before the collector was created. Through v0.4.1 this was unset and every
@@ -515,7 +512,6 @@ services:
       # your file into the volume and point this at it.
       GEOIP_DB_PATH: /geoip/dbip-city-lite.mmdb
     volumes:
-      - keys-collector:/keys:ro
       # A named volume rather than a bind mount, and it starts **empty**: this
       # platform has no checkout to mount from. So geo is null until somebody
       # puts a database in it, which is the documented degradation rather than a
@@ -678,6 +674,5 @@ volumes:
   keys-api:
   keys-gateway:
   keys-realtime:
-  keys-collector:
   keyring:
   geoip:

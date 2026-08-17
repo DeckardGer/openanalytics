@@ -272,17 +272,16 @@ chmod 600 .env
 echo "wrote .env"
 echo "images: ${IMAGE_MODE}"
 
-# --- the three signing pairs ------------------------------------------------
+# --- the two signing pairs --------------------------------------------------
 # Query signing   api -> query gateway   (private on api, public on gateway)
 # Realtime tokens api -> realtime        (private on api, public on realtime)
-# Rule preview    api -> collector       (private on api, public on collector)
 #
 # In every pair the api holds the private half and the verifying service holds
 # only the public one, so a compromised verifier can never mint what it checks.
 KEYDIR="$(mktemp -d)"
 trap 'rm -rf "$KEYDIR"' EXIT
 
-for pair in query realtime preview; do
+for pair in query realtime; do
 	openssl genpkey -algorithm ed25519 -out "$KEYDIR/$pair.private.pem" 2>/dev/null
 	openssl pkey -in "$KEYDIR/$pair.private.pem" -pubout -out "$KEYDIR/$pair.public.pem" 2>/dev/null
 done
@@ -298,7 +297,7 @@ emit_key() {
 	cat <<'HEADER'
 # GENERATED — DO NOT COMMIT. Written by ./generate-secrets.sh.
 #
-# The three Ed25519 pairs, split across the services entitled to each half.
+# The two Ed25519 pairs, split across the services entitled to each half.
 # `docker compose` merges this file automatically because of its name, so there
 # is no extra `-f` to forget — and forgetting it would boot an api with the
 # analytics and realtime surfaces silently unmounted.
@@ -322,16 +321,12 @@ services:
 HEADER
 	emit_key QUERY_SIGNING_PRIVATE_KEY "$KEYDIR/query.private.pem"
 	emit_key REALTIME_TOKEN_SIGNING_KEY "$KEYDIR/realtime.private.pem"
-	emit_key PREVIEW_TOKEN_SIGNING_KEY "$KEYDIR/preview.private.pem"
 
 	printf '\n  gateway:\n    environment:\n'
 	emit_key QUERY_SIGNING_PUBLIC_KEY "$KEYDIR/query.public.pem"
 
 	printf '\n  realtime:\n    environment:\n'
 	emit_key REALTIME_TOKEN_VERIFY_KEY "$KEYDIR/realtime.public.pem"
-
-	printf '\n  collector:\n    environment:\n'
-	emit_key PREVIEW_TOKEN_VERIFY_KEY "$KEYDIR/preview.public.pem"
 } >docker-compose.override.yml
 chmod 600 docker-compose.override.yml
 echo "wrote docker-compose.override.yml"

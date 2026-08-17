@@ -159,8 +159,8 @@ services:
       - -ec
       - |
         apk add --no-cache openssl >/dev/null
-        mkdir -p /keys/api /keys/gateway /keys/realtime /keys/collector /keyring
-        for entry in "query gateway" "realtime realtime" "preview collector"; do
+        mkdir -p /keys/api /keys/gateway /keys/realtime /keyring
+        for entry in "query gateway" "realtime realtime"; do
           set -- $$entry
           pair=$$1
           dest=$$2
@@ -190,15 +190,14 @@ services:
         # uid 1000 is `node` in the runtime image, which is the user every
         # service runs as.
         chown -R 1000:1000 /keys /keyring
-        chmod 700 /keys/api /keys/gateway /keys/realtime /keys/collector /keyring
+        chmod 700 /keys/api /keys/gateway /keys/realtime /keyring
         chmod 400 /keys/api/*.pem /keyring/credential-keyring.json
-        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem /keys/collector/*.pem
-        ls -l /keys/api /keys/gateway /keys/realtime /keys/collector /keyring
+        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem
+        ls -l /keys/api /keys/gateway /keys/realtime /keyring
     volumes:
       - keys-api:/keys/api
       - keys-gateway:/keys/gateway
       - keys-realtime:/keys/realtime
-      - keys-collector:/keys/collector
       - keyring:/keyring
 
   # --- one-shot: the geo database -------------------------------------------
@@ -362,7 +361,6 @@ services:
       AUTH_PASSWORD_SIGNIN: enabled
       QUERY_SIGNING_PRIVATE_KEY_FILE: /keys/query.private.pem
       REALTIME_TOKEN_SIGNING_KEY_FILE: /keys/realtime.private.pem
-      PREVIEW_TOKEN_SIGNING_KEY_FILE: /keys/preview.private.pem
     volumes:
       - keys-api:/keys:ro
       - keyring:/keyring:ro
@@ -388,13 +386,11 @@ services:
       REALTIME_CACHE_REDIS_URL: redis://:${VALKEY_REALTIME_PASSWORD}@valkey-realtime:6379
       ANONYMOUS_IDENTITY_SECRET: ${ANONYMOUS_IDENTITY_SECRET}
       ANONYMOUS_IDENTITY_KEY_VERSION: 1
-      PREVIEW_TOKEN_VERIFY_KEY_FILE: /keys/preview.public.pem
       # Set, because the `geoip` one-shot guarantees the file. To use MaxMind
       # instead, or a newer build: copy your file into the volume and point
       # this at it.
       GEOIP_DB_PATH: /geoip/dbip-city-lite.mmdb
     volumes:
-      - keys-collector:/keys:ro
       # Not read-only: `docker cp` into the running container is the documented
       # way to refresh the database or swap in MaxMind.
       - geoip:/geoip
@@ -528,6 +524,5 @@ volumes:
   keys-api:
   keys-gateway:
   keys-realtime:
-  keys-collector:
   keyring:
   geoip:

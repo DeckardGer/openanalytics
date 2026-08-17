@@ -1,4 +1,4 @@
-# The three signing pairs as FILES, generated inside the stack.
+# The two signing pairs as FILES, generated inside the stack.
 #
 # USE THIS *INSTEAD OF* the `docker-compose.override.yml` that
 # `./generate-secrets.sh` writes — this route generates its own pairs, so the
@@ -23,11 +23,11 @@
 # THE SPLIT IS THE POINT, AND IT SURVIVES. In each pair the api holds the
 # private half and the verifying service holds only the public one, so a
 # compromised verifier can never mint what it checks. Here that split is a
-# filesystem fact rather than an env-var convention: four separate volumes, each
+# filesystem fact rather than an env-var convention: three separate volumes, each
 # service mounting only its own, read-only. A single volume with a shared
 # directory would put every private half one `cat` away from every verifier.
 #
-# Four volumes rather than one volume with sub-paths on purpose — `subpath` is a
+# Separate volumes rather than one volume with sub-paths on purpose — `subpath` is a
 # recent addition to the Compose spec and the catalogues above do not all
 # express it, while "mount this volume there" is the oldest primitive there is.
 
@@ -61,11 +61,11 @@ services:
         # Compose substitutes dollar-variables throughout a compose file before
         # the container ever sees it, so a single-dollar `$$pair` below would
         # reach the shell as an empty string and this script would generate
-        # `/keys/api/.private.pem` three times. `$$` is how a dollar survives
+        # `/keys/api/.private.pem` for each pair. `$$` is how a dollar survives
         # into the container.
         #
         # IDEMPOTENT, and this is load-bearing. Platforms re-run the whole stack
-        # on every redeploy. Regenerating would rotate all three pairs behind
+        # on every redeploy. Regenerating would rotate both pairs behind
         # everyone's back: the api would mint under a new private half while the
         # tokens already in visitors' browsers were signed by the old one, and
         # nothing would say so out loud.
@@ -80,7 +80,7 @@ services:
         # 0444 inside 0700 directories owned by uid 1000, and `openssl -out`
         # against one of those fails for anything but root. Skipping instead of
         # overwriting means the second run does no work it could be refused.
-        for entry in "query gateway" "realtime realtime" "preview collector"; do
+        for entry in "query gateway" "realtime realtime"; do
           set -- $$entry
           pair=$$1
           dest=$$2
@@ -101,18 +101,17 @@ services:
         # service runs as. Private halves readable by owner only; public halves
         # are not secret and are readable by anyone who already has the volume.
         chown -R 1000:1000 /keys
-        chmod 700 /keys/api /keys/gateway /keys/realtime /keys/collector
+        chmod 700 /keys/api /keys/gateway /keys/realtime
         chmod 400 /keys/api/*.pem
-        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem /keys/collector/*.pem
-        ls -l /keys/api /keys/gateway /keys/realtime /keys/collector
+        chmod 444 /keys/gateway/*.pem /keys/realtime/*.pem
+        ls -l /keys/api /keys/gateway /keys/realtime
     volumes:
       - keys-api:/keys/api
       - keys-gateway:/keys/gateway
       - keys-realtime:/keys/realtime
-      - keys-collector:/keys/collector
     networks: [oa]
 
-  # --- the four services that hold a half ----------------------------------
+  # --- the three services that hold a half ----------------------------------
   #
   # `depends_on` expresses the ordering where the platform supports it. Where it
   # does not, nothing breaks: a service handed a path to a file that is not
@@ -125,7 +124,6 @@ services:
     environment:
       QUERY_SIGNING_PRIVATE_KEY_FILE: /keys/query.private.pem
       REALTIME_TOKEN_SIGNING_KEY_FILE: /keys/realtime.private.pem
-      PREVIEW_TOKEN_SIGNING_KEY_FILE: /keys/preview.private.pem
     volumes:
       - keys-api:/keys:ro
     depends_on:
@@ -147,16 +145,7 @@ services:
     depends_on:
       keygen: { condition: service_completed_successfully }
 
-  collector:
-    environment:
-      PREVIEW_TOKEN_VERIFY_KEY_FILE: /keys/preview.public.pem
-    volumes:
-      - keys-collector:/keys:ro
-    depends_on:
-      keygen: { condition: service_completed_successfully }
-
 volumes:
   keys-api:
   keys-gateway:
   keys-realtime:
-  keys-collector:

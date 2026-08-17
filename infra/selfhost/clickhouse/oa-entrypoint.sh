@@ -116,12 +116,6 @@ cat >"$TARGET" <<XML
         <query>GRANT INSERT ON analytics.revenue_1d</query>
         <query>GRANT SELECT ON analytics.revenue_1d</query>
 
-        <!-- Preview and test-mode events. INSERT only: the worker writes this
-             table instead of events_raw whenever an event is test_mode, and
-             nothing reads it back on the ingest credential. Without this grant
-             a preview session's events fail to insert while ordinary traffic
-             keeps flowing, which is the quiet half of the failure. -->
-        <query>GRANT INSERT ON analytics.events_preview</query>
       </grants>
     </oa_ingest>
 

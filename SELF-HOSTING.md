@@ -292,8 +292,8 @@ Each service validates its own environment at startup, and **a service handed a
 secret it must not hold exits rather than starting**. That is the boundary the
 architecture rests on:
 
-- the internet-facing collector holds no ClickHouse credential, no Stripe key,
-  no mail credential and cannot mint the preview tokens it verifies;
+- the internet-facing collector holds no ClickHouse credential, no Stripe key
+  and no mail credential;
 - the query gateway holds the public verify key and never the private one, so it
   cannot forge the requests it exists to authenticate;
 - only the worker holds the credential that can delete analytics rows;
@@ -336,13 +336,12 @@ that should:
 | `ANONYMOUS_IDENTITY_SECRET` | `env/collector.env`, `env/worker.env` |
 | `OA_CREDENTIAL_KEYRING`     | `env/api.env`, `env/worker.env`       |
 
-### The three key pairs, and why they are not in an env file
+### The two key pairs, and why they are not in an env file
 
 | Pair            | Private half (api mints) | Public half (verifies only) |
 | --------------- | ------------------------ | --------------------------- |
 | Query signing   | api                      | query gateway               |
 | Realtime tokens | api                      | realtime                    |
-| Rule preview    | api                      | collector                   |
 
 ```sh
 openssl genpkey -algorithm ed25519 -out private.pem
@@ -573,7 +572,6 @@ feature it has not enabled.
 | `OA_CREDENTIAL_KEYRING`                                                  | Revenue-connection routes that encrypt are not mounted (404); reading and disconnecting still work. Account → Deployment closes with `no_keyring`, because it would be storing secrets it cannot protect.              |
 | `CREDENTIAL_SOURCE_SECRET`                                               | No credential events are journalled at all. Reads are untouched.                                                                                                                                                       |
 | `OBJECT_STORAGE_*`                                                       | Data import and export are not mounted.                                                                                                                                                                                |
-| `PREVIEW_TOKEN_*`                                                        | Rule preview is unavailable; the published rule set is served instead. A preview that cannot be authenticated is served as no preview, never as an unauthenticated one.                                                |
 | `REALTIME_CACHE_REDIS_URL` on the gateway                                | Replay defence becomes per-process — correct only with a single gateway instance. It warns.                                                                                                                            |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_NOTIFY_CHAT_ID`                         | Notifications use the log transport.                                                                                                                                                                                   |
 | `METRICS_REMOTE_WRITE_*`                                                 | No metrics pipeline; the structured-log metrics floor remains.                                                                                                                                                         |

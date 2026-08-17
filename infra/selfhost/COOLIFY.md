@@ -111,7 +111,7 @@ dig +short app.<domain> A
 **Environment Variables** in the left menu. Most of them are already filled:
 every password, every base64 secret, every FQDN. Do not touch those.
 
-**Two things are deliberately not there.** The three signing key pairs, and the
+**Two things are deliberately not there.** The two signing key pairs, and the
 credential keyring that encrypts connected provider credentials. A one-shot step
 inside the stack makes both and hands them over as files, because no generator
 on this platform can produce either: a keypair whose halves must match across two

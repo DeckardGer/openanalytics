@@ -68,7 +68,7 @@ CLICKHOUSE_MIGRATION_PASSWORD = "${clickhouse_migration_password}"
 VALKEY_QUEUE_PASSWORD = "${valkey_queue_password}"
 VALKEY_REALTIME_PASSWORD = "${valkey_realtime_password}"
 
-# Application secrets. The three signing key pairs and the credential keyring
+# Application secrets. The two signing key pairs and the credential keyring
 # are deliberately NOT here: the `keygen` one-shot generates them inside the
 # stack, because no platform generator can produce a keypair whose halves
 # must match across two services.
