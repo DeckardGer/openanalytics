@@ -54,15 +54,14 @@ describe('D-101 billable matrix', () => {
     expect(classifyEvent({ type: 'custom_event', origin: 'internal' }).usageUnits).toBe(0)
   })
 
-  it('charges nothing for bot, invalid, duplicate or test traffic', () => {
+  it('charges nothing for bot, invalid or duplicate traffic', () => {
     const base = { type: 'page_view', origin: 'client_sdk' } as const
 
     expect(classifyEvent({ ...base, bot: true }).reason).toBe('bot')
     expect(classifyEvent({ ...base, invalid: true }).reason).toBe('invalid')
     expect(classifyEvent({ ...base, duplicate: true }).reason).toBe('duplicate')
-    expect(classifyEvent({ ...base, testMode: true }).reason).toBe('test_mode')
 
-    for (const flag of ['bot', 'invalid', 'duplicate', 'testMode'] as const) {
+    for (const flag of ['bot', 'invalid', 'duplicate'] as const) {
       expect(classifyEvent({ ...base, [flag]: true }).usageUnits).toBe(0)
     }
   })

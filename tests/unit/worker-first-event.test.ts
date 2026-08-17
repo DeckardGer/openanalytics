@@ -65,7 +65,6 @@ const BASE: PersistedEvent = {
   usage_window_id: null,
   billing_grace: false,
   billable: true,
-  test_mode: false,
   rule_id: null,
   rule_version: null,
   anonymous_id: 'anon-1',

@@ -582,50 +582,6 @@ export async function archiveEventDefinition(
   })
 }
 
-/**
- * One unpublished version's rules, for a preview (ADR-0034, D6).
- *
- * Site-scoped like every other read here, so a preview token cannot be used to
- * read a definition on a site it does not name. Returns `null` when the version
- * does not exist on that site — which the config endpoint turns into "no
- * preview", serving the published set rather than an error.
- *
- * Deliberately NOT routed through the ingest-config cache: that cache is keyed
- * by tracking key and holds the *published* set, and a draft that entered it
- * would be served to real visitors for the length of its TTL.
- */
-export async function readPreviewRules(
-  db: Database,
-  input: { readonly siteId: string; readonly definitionId: string; readonly version: number },
-): Promise<PublishedRuleRecord[] | null> {
-  const [row] = await db
-    .select({
-      definitionId: eventDefinitions.id,
-      eventName: eventDefinitions.eventName,
-      version: eventDefinitionVersions.version,
-      rules: eventDefinitionVersions.rules,
-    })
-    .from(eventDefinitionVersions)
-    .innerJoin(eventDefinitions, eq(eventDefinitions.id, eventDefinitionVersions.definitionId))
-    .where(
-      and(
-        eq(eventDefinitionVersions.definitionId, input.definitionId),
-        eq(eventDefinitionVersions.version, input.version),
-        eq(eventDefinitions.siteId, input.siteId),
-        isNull(eventDefinitions.archivedAt),
-      ),
-    )
-    .limit(1)
-
-  if (!row) return null
-  return row.rules.map((rule) => ({
-    definitionId: row.definitionId,
-    eventName: row.eventName,
-    version: row.version,
-    rule,
-  }))
-}
-
 /** The human labels a read path attaches to a canonical event name. */
 export interface EventDisplayRecord {
   readonly eventName: string

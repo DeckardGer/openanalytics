@@ -187,7 +187,6 @@ export function createEventRoutes(deps: CollectorDeps, limiter: IngestLimiter) {
       bot: false,
       ...('name' in event && event.name !== undefined ? { name: event.name } : {}),
       ...(event.action_id === undefined ? {} : { actionId: event.action_id }),
-      ...(batch.context.test_mode === undefined ? {} : { testMode: batch.context.test_mode }),
     }))
     const classifications = classifyEvents(candidates)
     const billable = billableCount(classifications)
@@ -237,7 +236,6 @@ export function createEventRoutes(deps: CollectorDeps, limiter: IngestLimiter) {
         receivedAt: gate.receivedAt,
         acceptedAt,
         billable: classifications[index]?.billable ?? false,
-        testMode: batch.context.test_mode === true,
         rule: ruleFor(event),
         usageWindowStart: window?.startsAt ?? acceptedAt,
         grace: gate.grace,
@@ -411,8 +409,6 @@ interface BuildPersistedInput {
   readonly receivedAt: Date
   readonly acceptedAt: Date
   readonly billable: boolean
-  /** Server-decided non-production traffic (ADR-0034, D6). */
-  readonly testMode: boolean
   /** The published rule this event was established as coming from, if any. */
   readonly rule: { readonly ruleId: string; readonly version: number } | null
   readonly usageWindowStart: Date
@@ -500,10 +496,8 @@ function buildPersistedEvent(input: BuildPersistedInput): PersistedEvent {
     usage_window_id: null,
     billing_grace: input.grace,
     billable: input.billable,
-    // Server-set, both of them. `test_mode` decides which ClickHouse table the
-    // worker writes to, and `rule_id` is only ever the id of a rule this site
-    // actually publishes -- never the one the client claimed (ADR-0034, D5/D6).
-    test_mode: input.testMode,
+    // Server-set: `rule_id` is only ever the id of a rule this site actually
+    // publishes -- never the one the client claimed (ADR-0034, D5).
     rule_id: input.rule?.ruleId ?? null,
     rule_version: input.rule?.version ?? null,
 

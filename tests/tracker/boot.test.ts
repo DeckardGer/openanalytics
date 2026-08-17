@@ -241,32 +241,6 @@ describe('tracker boot path', () => {
     clock.mockRestore()
   })
 
-  it('does not revalidate on route change during a rule preview', async () => {
-    // A preview bypasses the cache by design (ADR-0034, D6), so wiring the
-    // revalidation here would make every route change an unconditional request
-    // for a draft rule set nobody asked for again.
-    // The token is read from the PAGE URL, which is where the dashboard puts it
-    // — not from a script attribute.
-    resetBrowser('/pricing?oa_preview=tok')
-    const startedAt = Date.now()
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt)
-
-    await boot()
-    await settle()
-    const afterBoot = configRequests().length
-    expect(afterBoot).toBeGreaterThan(0)
-
-    // Well past the TTL — the interval that makes the previous test revalidate.
-    clock.mockReturnValue(startedAt + CONFIG_CACHE_TTL_MS * 10)
-    window.history.pushState({}, '', '/a?oa_preview=tok')
-    await settle()
-    window.history.pushState({}, '', '/b?oa_preview=tok')
-    await settle()
-
-    expect(configRequests()).toHaveLength(afterBoot)
-    clock.mockRestore()
-  })
-
   it('writes nothing to the device in strict mode, and still sends (ADR-0064 D5)', async () => {
     // The claim `data-storage="none"` makes is absolute, so the assertion is
     // absolute too: not "no oa.* key", but no call at all, on either store, in

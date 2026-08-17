@@ -85,7 +85,7 @@ const allowlist: GrantAllowRow[] = [
   { method: 'DELETE', path: '/v1/sites/:site/funnels/:funnel', scope: 'funnels:write' },
 
   // Event definitions — create / draft / publish / rollback (publish is
-  // reversible because rollback exists); no DELETE, no preview.
+  // reversible because rollback exists); no DELETE.
   { method: 'GET', path: '/v1/sites/:site/event-definitions', scope: 'analytics:read' },
   { method: 'GET', path: '/v1/sites/:site/event-definitions/:def', scope: 'analytics:read' },
   {

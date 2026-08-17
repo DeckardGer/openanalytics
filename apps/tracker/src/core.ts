@@ -97,7 +97,6 @@ export interface TrackerOptions {
   readonly collectorUrl: string
   /** Defaults to the ambient window; injected in tests. */
   readonly window?: Window & typeof globalThis
-  readonly testMode?: boolean
   readonly debug?: boolean
   /**
    * `'none'` runs the tracker memory-only (ADR-0064, D5): nothing is written to
@@ -194,7 +193,6 @@ export function createTracker(options: TrackerOptions): Tracker {
   const context: TrackerContext = {
     sdk: TRACKER_SDK,
     sdk_version: TRACKER_VERSION,
-    ...(options.testMode === true ? { test_mode: true } : {}),
   }
 
   const transport = createTransport({

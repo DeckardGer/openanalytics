@@ -108,7 +108,7 @@ export function installTracker(
 export function optionsFromScript(
   script: Element | null,
   fallbackOrigin: string,
-): Pick<TrackerOptions, 'trackingKey' | 'collectorUrl' | 'debug' | 'testMode' | 'storage'> & {
+): Pick<TrackerOptions, 'trackingKey' | 'collectorUrl' | 'debug' | 'storage'> & {
   privacyPolicy: Partial<PrivacyPolicy>
 } {
   const attribute = (name: string): string | null => script?.getAttribute(name) ?? null
@@ -127,7 +127,8 @@ export function optionsFromScript(
   if (consent !== undefined) privacyPolicy.requireConsent = consent
 
   const debug = flag('data-debug')
-  const testMode = flag('data-test-mode')
+  // `data-test-mode` is intentionally not read: the attribute is retired
+  // (ADR-0068) and a snippet still carrying it gets ordinary, visible traffic.
   // `data-storage="none"` and nothing else. Read as an exact value rather than
   // through `flag()`, because the other attributes are booleans whose default is
   // the interesting half — this one names a mode, and a typo must fall back to
@@ -138,7 +139,6 @@ export function optionsFromScript(
     trackingKey: attribute('data-key') ?? '',
     collectorUrl: attribute('data-collector') ?? fallbackOrigin,
     ...(debug === undefined ? {} : { debug }),
-    ...(testMode === undefined ? {} : { testMode }),
     ...(storage === undefined ? {} : { storage }),
     privacyPolicy,
   }

@@ -868,10 +868,8 @@ export const widgets = {
  * - **A publish reaches an already-loaded browser in up to ~10 minutes**
  *   (HTTP cache + tracker config cache). There is no completion signal.
  *
- * Preview mints a 15-minute signed token for `?oa_preview=` on the customer's
- * own site; the events it produces are `test_mode` and touch no production
- * read. Reads are membership-only (viewer included); every mutation, preview
- * included, needs `site:settings`.
+ * Reads are membership-only (viewer included); every mutation needs
+ * `site:settings`.
  */
 export const eventDefinitions = {
   list: (siteId: string, includeArchived = false) =>
@@ -929,12 +927,6 @@ export const eventDefinitions = {
       "POST",
       `/v1/sites/${siteId}/event-definitions/${definitionId}/rollback`,
       { body }
-    ),
-  preview: (siteId: string, definitionId: string, version: number) =>
-    send<{ token: string; expires_at: string; version: number }>(
-      "POST",
-      `/v1/sites/${siteId}/event-definitions/${definitionId}/preview`,
-      { body: { version } }
     ),
 };
 

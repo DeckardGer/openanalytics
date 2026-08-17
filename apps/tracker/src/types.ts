@@ -74,7 +74,6 @@ export interface TrackerEvent {
 export interface TrackerContext {
   readonly sdk: 'web'
   readonly sdk_version: string
-  readonly test_mode?: boolean
 }
 
 export interface EventBatchBody {

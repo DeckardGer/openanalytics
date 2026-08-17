@@ -26,10 +26,6 @@ export default function ScriptOptionsPage() {
           head={["Attribute", "Effect"]}
           rows={[
             [
-              <Code key="a">data-test-mode</Code>,
-              "Marks the traffic non-production. It never bills, and it stays out of every chart, rollup and realtime view. Use it on staging and local environments.",
-            ],
-            [
               <Code key="b">data-debug</Code>,
               "Logs transport failures to the browser console. Useful while installing, off in production.",
             ],
@@ -63,12 +59,17 @@ export default function ScriptOptionsPage() {
       </DocSection>
 
       <DocSection title="Example: staging install">
+        <p>
+          Create a separate site for staging and use its own tracking key, so
+          staging traffic never mixes into production charts. (An older{" "}
+          <Code>data-test-mode</Code> attribute is retired and ignored: traffic
+          from snippets still carrying it is ordinary, visible and billable.)
+        </p>
         <DocCode caption="<head> on staging">{`<script
   async
   src="${COLLECTOR_BASE_URL}/oa.js"
-  data-key="YOUR_TRACKING_KEY"
+  data-key="YOUR_STAGING_SITE_KEY"
   data-collector="${COLLECTOR_BASE_URL}"
-  data-test-mode="true"
   data-debug="true"
 ></script>`}</DocCode>
       </DocSection>

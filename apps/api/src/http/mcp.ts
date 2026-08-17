@@ -555,10 +555,9 @@ const mcpTools: McpToolDefinition[] = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   // Event definitions (ADR-0034; allowlist rows in `grant-arm.ts`). The four
-  // that ADR-0048 D3 named: create, draft, publish, rollback. Deliberately
-  // absent, because neither has an allowlist row: `DELETE` (archiving a
-  // definition stops its rules being served site-wide) and `preview` (which
-  // puts unpublished rules into a real browser on the customer's real site).
+  // that ADR-0048 D3 named: create, draft, publish, rollback. `DELETE` is
+  // deliberately absent, because it has no allowlist row: archiving a
+  // definition stops its rules being served site-wide.
   {
     name: 'create_event_definition',
     description:

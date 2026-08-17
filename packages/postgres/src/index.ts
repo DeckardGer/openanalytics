@@ -459,7 +459,6 @@ export {
   listEventDisplayNames,
   listPublishedRules,
   publishEventDefinition,
-  readPreviewRules,
   rollbackEventDefinition,
   saveEventDefinitionVersion,
   type CreateEventDefinitionInput,

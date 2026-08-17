@@ -167,15 +167,10 @@ export function createIngestConfigStore(options: IngestConfigStoreOptions): Inge
  * (ADR-0008, ADR-0034 D4).
  *
  * `no_code_rules` carries the site's published rules (ADR-0034). It was an
- * empty array from M4 until M13, which is what migration 0014 promised; the
- * override below is how a *preview* is served instead, and it is the only way
- * an unpublished rule ever reaches a browser.
+ * empty array from M4 until M13, which is what migration 0014 promised.
  */
-export function toTrackerConfig(
-  resolved: CachedIngestConfig,
-  overrides: { readonly noCodeRules?: readonly ResolvedNoCodeRule[] } = {},
-): TrackerConfig {
-  const rules = overrides.noCodeRules ?? resolved.noCodeRules
+export function toTrackerConfig(resolved: CachedIngestConfig): TrackerConfig {
+  const rules = resolved.noCodeRules
   return {
     config_version: resolved.config.configVersion,
     site_timezone: resolved.settings.timezone,
@@ -213,23 +208,7 @@ export function toTrackerConfig(
  * the same question about the same key, and two caches would let a revoked key
  * keep working on one of them after it stopped working on the other.
  */
-export function createTrackerConfigStore(
-  store: IngestConfigStore,
-  /**
-   * Reads one unpublished version's rules for a preview (ADR-0034, D6).
-   *
-   * Injected rather than taken from the ingest store, because it is the one
-   * read on this surface that must NOT be cached: a preview names a specific
-   * draft version, and the ingest cache is keyed by tracking key and holds the
-   * published set. Absent, previews simply do not resolve and the published
-   * configuration is served instead.
-   */
-  readPreviewRules?: (input: {
-    siteId: string
-    definitionId: string
-    version: number
-  }) => Promise<readonly ResolvedNoCodeRule[] | null>,
-): TrackerConfigStore {
+export function createTrackerConfigStore(store: IngestConfigStore): TrackerConfigStore {
   const liveResolved = async (trackingKey: string): Promise<CachedIngestConfig | null> => {
     const resolved = await store.resolve(trackingKey)
     if (resolved === null) return null
@@ -250,35 +229,5 @@ export function createTrackerConfigStore(
       if (resolved === null) return null
       return { siteId: resolved.config.siteId, config: toTrackerConfig(resolved) }
     },
-
-    ...(readPreviewRules === undefined
-      ? {}
-      : {
-          async findPreview(
-            trackingKey: string,
-            preview: { definitionId: string; version: number; siteId: string },
-          ): Promise<TrackerConfigRecord | null> {
-            const resolved = await liveResolved(trackingKey)
-            if (resolved === null) return null
-
-            // The token names a site; the tracking key resolves to one. They
-            // must be the same site, or a token minted for a site the caller
-            // administers would let them read a *different* site's drafts by
-            // presenting that site's public tracking key -- which is public.
-            if (resolved.config.siteId !== preview.siteId) return null
-
-            const rules = await readPreviewRules({
-              siteId: preview.siteId,
-              definitionId: preview.definitionId,
-              version: preview.version,
-            })
-            if (rules === null) return null
-
-            return {
-              siteId: resolved.config.siteId,
-              config: toTrackerConfig(resolved, { noCodeRules: rules }),
-            }
-          },
-        }),
   }
 }

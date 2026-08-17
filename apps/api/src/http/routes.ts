@@ -594,16 +594,7 @@ export function createBusinessRoutes(deps: RoutesDeps): Hono<Env> {
 
   // Dashboard-defined custom events (ADR-0034). Unconditional for the same
   // reason as funnels: a definition is a Postgres write and needs no gateway.
-  // The preview route is the one part that can be unavailable, and it says so
-  // itself rather than being absent from the routing table — a missing signing
-  // key is an operator problem, not a 404.
-  authed.route(
-    '/',
-    createEventDefinitionRoutes({
-      db,
-      previewSigningKey: env.PREVIEW_TOKEN_SIGNING_KEY,
-    }),
-  )
+  authed.route('/', createEventDefinitionRoutes({ db }))
 
   // The import provider catalog (ADR-0032, D11). Unconditional, like the funnels
   // surface and unlike the site-scoped import routes below: it is a static list

@@ -579,7 +579,7 @@ describe('the published fixture is what the route actually returns', () => {
   })
 })
 
-describe('the deletion registry, at 63 after the open-core split (ADR-0045, D8)', () => {
+describe('the deletion registry, at 62 after ADR-0068 dropped events_preview', () => {
   /**
    * Pinned here as well as in the migration suite because that suite needs a
    * database and therefore only runs in CI: a widget table that is not a
@@ -588,10 +588,10 @@ describe('the deletion registry, at 63 after the open-core split (ADR-0045, D8)'
    */
   it('names the widget table as a Postgres target', () => {
     expect(DELETION_POSTGRES_TARGETS).toContain('widgets')
-    // 63, not 64: `billing_transfer_offers` is registered by the hosted surface
+    // 62, not 63: `billing_transfer_offers` is registered by the hosted surface
     // (`CLOUD_DELETION_EXTENSION`), so what this pins is the set a build with no
     // such surface erases.
-    expect(SITE_DELETION_TARGETS).toHaveLength(63)
+    expect(SITE_DELETION_TARGETS).toHaveLength(62)
     expect(SITE_DELETION_TARGETS.filter((t) => t.store === 'postgres')).toHaveLength(22)
     expect(SITE_DELETION_TARGETS).toContainEqual({ store: 'postgres', target: 'widgets' })
   })

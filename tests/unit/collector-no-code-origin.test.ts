@@ -130,8 +130,8 @@ describe('the raw/no-code collapse', () => {
   })
 
   it('does not let a non-billable no-code event suppress anything', () => {
-    // A test-mode no-code event is 0 units; it must not take the raw event's
-    // unit with it, or `test_mode` would become a way to zero a real event.
+    // A bot-flagged no-code event is 0 units; it must not take the raw event's
+    // unit with it, or the flag would become a way to zero a real event.
     const batch = [
       candidate({ eventId: 'raw', name: 'x', actionId: 'a1' }),
       candidate({
@@ -139,7 +139,7 @@ describe('the raw/no-code collapse', () => {
         origin: 'no_code_rule',
         name: 'x',
         actionId: 'a1',
-        testMode: true,
+        bot: true,
       }),
     ]
     const classifications = classifyEvents(batch)

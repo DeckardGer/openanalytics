@@ -172,8 +172,7 @@ describe('the contract describes the grant allowlist exactly (ADR-0048 D2)', () 
 
   it('leaves the never-writable operations unmarked', () => {
     // The named refusals of D2, spelled out rather than inferred from the
-    // absence above: deletion, member and invite management, credentials, and
-    // the rule preview that puts unpublished rules in a real browser.
+    // absence above: deletion, member and invite management, and credentials.
     const unmarked = [
       ['DELETE', '/v1/sites/{site_id}'],
       ['PATCH', '/v1/sites/{site_id}/members/{user_id}'],
@@ -182,7 +181,6 @@ describe('the contract describes the grant allowlist exactly (ADR-0048 D2)', () 
       ['POST', '/v1/sites/{site_id}/keys'],
       ['DELETE', '/v1/sites/{site_id}/widgets/{widget_id}'],
       ['DELETE', '/v1/sites/{site_id}/event-definitions/{definition_id}'],
-      ['POST', '/v1/sites/{site_id}/event-definitions/{definition_id}/preview'],
       ['DELETE', '/v1/me'],
       ['POST', '/v1/assistant/questions'],
     ] as const

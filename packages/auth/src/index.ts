@@ -66,26 +66,6 @@ export {
 } from './realtime-token.ts'
 
 /**
- * The rule-preview token (ADR-0034, D6). Here for the same reason the realtime
- * codec is: the api signs, the collector verifies, and apps may not import each
- * other.
- */
-export {
-  PREVIEW_TOKEN_AUDIENCE,
-  PREVIEW_TOKEN_IAT_SKEW_SECONDS,
-  PREVIEW_TOKEN_SCHEME,
-  PREVIEW_TOKEN_TTL_SECONDS,
-  loadPreviewVerifyKey,
-  signPreviewToken,
-  verifyPreviewToken,
-  type PreviewTokenClaims,
-  type PreviewTokenRejectReason,
-  type PreviewTokenVerifyResult,
-  type SignPreviewTokenInput,
-  type VerifyPreviewTokenOptions,
-} from './preview-token.ts'
-
-/**
  * Better Auth configuration — Postgres sessions, verified email, 30-day rolling
  * session and env-gated OAuth (docs snapshot 02 §1 item 13). The verification
  * email leaves only through the injected outbox enqueue callback.

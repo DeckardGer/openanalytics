@@ -136,13 +136,6 @@ export const DELETION_CLICKHOUSE_TARGETS = [
   // last stored generation would simply stand forever.
   'revenue_1h',
   'revenue_1d',
-  // Preview and test-mode events (ADR-0034, D6/D9; ClickHouse migration 0020).
-  //
-  // Site-scoped like every other target, so the existing delete-by-site
-  // statement covers it unchanged. It is a target despite carrying a 7-day TTL:
-  // a deletion must not be left waiting on one, and "the rows expire eventually"
-  // is not an answer to "erase this customer's data now".
-  'events_preview',
   // What a custom-events row may say beyond a count (ADR-0038, D5/D8;
   // ClickHouse migration 0021).
   //
@@ -292,10 +285,9 @@ export const DELETION_POSTGRES_TARGETS = [
   // verified at `deleted: N`, and verification is what this registry is for
   // (ADR-0030, decision 4).
   //
-  // The preview *token* is deliberately not here and never will be: it is an
+  // The rule-preview *token* was deliberately never here: it was an
   // Ed25519-signed value with a 15-minute expiry, held in no table (ADR-0034,
-  // D6). There is nothing to purge, and a target that could only ever verify at
-  // zero would be a claim we had erased something we never stored.
+  // D6) — nothing to purge. The whole mechanism is gone now (ADR-0068).
   'event_definition_versions',
   'event_definitions',
   // The embeddable widget configuration (ADR-0045, D8; migration 0048).

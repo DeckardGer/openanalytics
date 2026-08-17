@@ -1,11 +1,9 @@
-import { generateKeyPairSync } from 'node:crypto'
 import {
   errorEnvelopeSchema,
   trackerConfigSchema,
   type TrackerConfig,
   type components,
 } from '@openanalytics/contracts'
-import { signPreviewToken } from '@openanalytics/auth'
 import { loadServiceEnv, MAX_PUBLISHED_RULES_PER_SITE } from '@openanalytics/domain'
 import { createServiceMetadata } from '@openanalytics/observability'
 import { createCapturedLogger, testEnv } from '@openanalytics/testkit'
@@ -45,23 +43,13 @@ const CONFIG: TrackerConfigRecord = {
   },
 }
 
-function buildApp(
-  store?: {
-    find(key: string): Promise<TrackerConfigRecord | null>
-    findPreview?(
-      key: string,
-      preview: { definitionId: string; version: number; siteId: string },
-    ): Promise<TrackerConfigRecord | null>
-  },
-  previewVerifyKey?: string,
-) {
+function buildApp(store?: { find(key: string): Promise<TrackerConfigRecord | null> }) {
   const captured = createCapturedLogger()
   const app = createApp({
     service: createServiceMetadata({ name: 'collector', version: '1.0.0', environment: 'test' }),
     logger: captured.logger,
     env: loadServiceEnv('collector', testEnv()),
     ...(store ? { trackerConfigStore: store } : {}),
-    ...(previewVerifyKey ? { previewVerifyKey } : {}),
   })
   return { app, captured }
 }
@@ -168,126 +156,22 @@ describe('tracker config endpoint', () => {
 })
 
 /**
- * The preview branch (ADR-0034, D6).
+ * The retired preview branch (ADR-0068).
  *
- * A preview token is the only way an *unpublished* rule ever reaches a browser,
- * so the properties asserted here are the ones that keep it that way: a token
- * that does not verify is served as no preview rather than as an
- * unauthenticated one, and a preview response is never cached at any layer.
+ * The rule-preview mechanism is gone; a stale dashboard URL still carrying
+ * `?preview=` must get the published configuration like any other request.
  */
-describe('tracker config preview', () => {
-  const keys = (() => {
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-    return {
-      privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-      publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
-    }
-  })()
-
-  const DRAFT: TrackerConfigRecord = {
-    ...CONFIG,
-    config: {
-      ...CONFIG.config,
-      no_code_rules: [
-        {
-          rule_id: 'r_draft',
-          name: 'draft_event',
-          version: 4,
-          trigger: 'click',
-          selector: 'button.draft',
-        },
-      ],
-    },
-  }
-
-  const previewStore = {
-    find: (key: string) => Promise.resolve(key === 'oa_pub_live_abcdef123456' ? CONFIG : null),
-    findPreview: (key: string) =>
-      Promise.resolve(key === 'oa_pub_live_abcdef123456' ? DRAFT : null),
-  }
-
-  const token = (overrides: Record<string, unknown> = {}) =>
-    signPreviewToken({
-      privateKeyPem: keys.privateKeyPem,
-      siteId: 'site_1',
-      definitionId: 'def_1',
-      version: 4,
-      subject: 'u1',
-      issuedAt: new Date(),
-      jti: 'jti-1',
-      ...overrides,
-    })
-
-  it('serves the draft rule set for a valid token', async () => {
-    const { app } = buildApp(previewStore, keys.publicKeyPem)
+describe('tracker config ignores a stale preview parameter', () => {
+  it('serves the published set with ordinary caching headers', async () => {
+    const { app } = buildApp(workingStore)
     const response = await app.request(
-      `/v1/tracker/config?key=oa_pub_live_abcdef123456&preview=${encodeURIComponent(token())}`,
+      '/v1/tracker/config?key=oa_pub_live_abcdef123456&preview=some-stale-token',
     )
 
     expect(response.status).toBe(200)
     const body = trackerConfigSchema.parse(await response.json())
-    expect(body.no_code_rules.map((rule) => rule.rule_id)).toEqual(['r_draft'])
-  })
-
-  it('never caches a preview, at any layer', async () => {
-    const { app } = buildApp(previewStore, keys.publicKeyPem)
-    const response = await app.request(
-      `/v1/tracker/config?key=oa_pub_live_abcdef123456&preview=${encodeURIComponent(token())}`,
-    )
-
-    // A preview cached even for the ordinary five minutes would outlive the
-    // session it belongs to and follow a real visitor around.
-    expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(response.headers.get('etag')).toBeNull()
-  })
-
-  it('falls through to the published set when the token does not verify', async () => {
-    const other = generateKeyPairSync('ed25519')
-    const forged = signPreviewToken({
-      privateKeyPem: other.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-      siteId: 'site_1',
-      definitionId: 'def_1',
-      version: 4,
-      subject: 'u1',
-      issuedAt: new Date(),
-      jti: 'jti-2',
-    })
-
-    const { app } = buildApp(previewStore, keys.publicKeyPem)
-    const response = await app.request(
-      `/v1/tracker/config?key=oa_pub_live_abcdef123456&preview=${encodeURIComponent(forged)}`,
-    )
-
-    expect(response.status).toBe(200)
-    const body = trackerConfigSchema.parse(await response.json())
-    // The published set, and the ordinary caching headers with it.
     expect(body.no_code_rules.map((rule) => rule.rule_id)).toEqual(['r_1'])
     expect(response.headers.get('etag')).toBe('"oa-site_1-7"')
-  })
-
-  it('ignores the parameter entirely when no verify key is configured', async () => {
-    const { app } = buildApp(previewStore)
-    const response = await app.request(
-      `/v1/tracker/config?key=oa_pub_live_abcdef123456&preview=${encodeURIComponent(token())}`,
-    )
-
-    expect(response.status).toBe(200)
-    const body = trackerConfigSchema.parse(await response.json())
-    expect(body.no_code_rules.map((rule) => rule.rule_id)).toEqual(['r_1'])
-  })
-
-  it('falls through when the token is expired rather than erroring on the site', async () => {
-    const { app } = buildApp(previewStore, keys.publicKeyPem)
-    const stale = token({ issuedAt: new Date(Date.now() - 3_600_000) })
-    const response = await app.request(
-      `/v1/tracker/config?key=oa_pub_live_abcdef123456&preview=${encodeURIComponent(stale)}`,
-    )
-
-    // The user is on their own production site; an expired preview must show
-    // them their live rules, not an error page.
-    expect(response.status).toBe(200)
-    const body = trackerConfigSchema.parse(await response.json())
-    expect(body.no_code_rules.map((rule) => rule.rule_id)).toEqual(['r_1'])
   })
 })
 

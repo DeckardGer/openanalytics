@@ -1,9 +1,7 @@
 import { persistedEventSchema, type PersistedEvent } from '@openanalytics/contracts'
 import {
   ClickHouseInsertError,
-  toEventsPreviewRow,
   toEventsRawRow,
-  type EventsPreviewRow,
   type EventsRawRow,
 } from '@openanalytics/clickhouse'
 import { recoveryActionFor, retryDelayMs, type IngestBatchState } from '@openanalytics/domain'
@@ -248,19 +246,9 @@ export async function runManifest(deps: IngestDeps, manifest: Manifest): Promise
     const writable = await applyFence(deps, manifest, batch.events)
 
     if (action === 'insert') {
-      // ADR-0034 D6: preview and test-mode traffic goes to its own table and
-      // never to `events_raw`, which is what keeps it out of all thirteen
-      // materialized views, the sessionizer and every gateway operation without
-      // any of them having to filter. The split is here, at the one writer.
-      const rows: EventsRawRow[] = []
-      const previewRows: EventsPreviewRow[] = []
-      for (const event of writable) {
-        if (event.test_mode) {
-          previewRows.push(toEventsPreviewRow(event, { batchId: manifest.batchId }))
-        } else {
-          rows.push(toEventsRawRow(event, { batchId: manifest.batchId }))
-        }
-      }
+      const rows: EventsRawRow[] = writable.map((event) =>
+        toEventsRawRow(event, { batchId: manifest.batchId }),
+      )
 
       await markInserting(deps.db, manifest.batchId)
       state = 'inserting'
@@ -278,15 +266,6 @@ export async function runManifest(deps: IngestDeps, manifest: Manifest): Promise
           deps.metrics.increment(WORKER_METRICS.insertMs, {}, Date.now() - started)
           throw error
         }
-      }
-
-      if (previewRows.length > 0) {
-        // Same token, different table: deduplication is scoped per destination,
-        // so a retry after an ambiguous failure is a no-op on both halves. It is
-        // deliberately NOT wrapped in the insert metrics above -- preview volume
-        // is a person clicking around their own site, and folding it into the
-        // production insert counters would make the freshness graph lie.
-        await deps.clickhouse.insertPreviewEvents(previewRows, { token: manifest.batchId })
       }
 
       await markInserted(deps.db, manifest.batchId)

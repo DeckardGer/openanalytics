@@ -179,8 +179,6 @@ const HINTS = {
     'Ed25519 pair with QUERY_SIGNING_PUBLIC_KEY. Generate: `openssl genpkey -algorithm ed25519`. Multi-line PEM cannot live in an env FILE — inject it through compose `environment:` or a secret manager.',
   REALTIME_TOKEN_SIGNING_KEY:
     'Signs realtime tokens; REALTIME_TOKEN_VERIFY_KEY is its verifying half on the realtime service.',
-  PREVIEW_TOKEN_SIGNING_KEY:
-    'Signs rule-preview tokens; PREVIEW_TOKEN_VERIFY_KEY is its verifying half on the collector.',
   GEOIP_DB_PATH:
     'A City-schema .mmdb (GeoLite2 or DB-IP). Unset means every event carries null geo — a degradation, never a failure.',
   OA_CREDENTIAL_KEYRING:
@@ -334,8 +332,6 @@ const SECTIONS = [
       'QUERY_GATEWAY_TIMEOUT_MS',
       'REALTIME_TOKEN_SIGNING_KEY',
       'REALTIME_TOKEN_VERIFY_KEY',
-      'PREVIEW_TOKEN_SIGNING_KEY',
-      'PREVIEW_TOKEN_VERIFY_KEY',
     ],
   },
   {

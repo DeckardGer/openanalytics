@@ -41,7 +41,6 @@ const BASE: PersistedEvent = {
   usage_window_id: null,
   billing_grace: false,
   billable: true,
-  test_mode: false,
   rule_id: null,
   rule_version: null,
   anonymous_id: 'anon-1',
@@ -113,7 +112,6 @@ describe('folding the envelope payloads into properties', () => {
       event({
         type: 'interaction',
         billable: false,
-        test_mode: false,
         rule_id: null,
         rule_version: null,
         interaction: {
@@ -143,7 +141,6 @@ describe('folding the envelope payloads into properties', () => {
       event({
         type: 'engagement',
         billable: false,
-        test_mode: false,
         rule_id: null,
         rule_version: null,
         engagement: { active_ms: 4_000, visible_ms: 9_000 },

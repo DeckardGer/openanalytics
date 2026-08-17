@@ -42,7 +42,6 @@ export type NonBillableReason =
   | 'never_billable_type'
   | 'not_customer_traffic'
   | 'bot'
-  | 'test_mode'
   | 'invalid'
   | 'duplicate'
   | 'duplicate_source_action'
@@ -56,8 +55,6 @@ export interface ClassificationInput {
   readonly invalid?: boolean
   /** Already accepted inside the `(site_id,event_id)` dedup window (D-209). */
   readonly duplicate?: boolean
-  /** `context.test_mode` — non-production traffic. */
-  readonly testMode?: boolean
 }
 
 export interface EventClassification {
@@ -90,7 +87,6 @@ export function classifyEvent(input: ClassificationInput): EventClassification {
   if (NON_CUSTOMER_ORIGINS.has(input.origin)) return nonBillable(type, 'not_customer_traffic')
   if (input.invalid === true) return nonBillable(type, 'invalid')
   if (input.bot === true) return nonBillable(type, 'bot')
-  if (input.testMode === true) return nonBillable(type, 'test_mode')
   if (input.duplicate === true) return nonBillable(type, 'duplicate')
 
   return { type, billable: true, usageUnits: 1, reason: BILLABLE }

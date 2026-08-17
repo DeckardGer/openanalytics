@@ -59,11 +59,13 @@ export default function TroubleshootingPage() {
 
       <DocSection title="Keeping your own visits out">
         <p>
-          Use <Code>data-test-mode=&quot;true&quot;</Code> on staging and
-          local environments: that traffic never bills and never appears in
-          charts. There is no per-person exclusion cookie, because the
-          product does not recognise people; excluding an environment is the
-          honest version.
+          Create a separate site for staging and local environments and point
+          those snippets at its own tracking key: their traffic then lands in
+          its own dashboard instead of production&apos;s. There is no
+          per-person exclusion cookie, because the product does not recognise
+          people; separating environments is the honest version. (The old{" "}
+          <Code>data-test-mode</Code> attribute is retired and ignored —
+          traffic from snippets still carrying it is ordinary and visible.)
         </p>
       </DocSection>
 

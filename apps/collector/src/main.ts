@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server'
 import { createServiceMetrics } from '@openanalytics/observability'
-import { createDatabase, createPool, readPreviewRules } from '@openanalytics/postgres'
+import { createDatabase, createPool } from '@openanalytics/postgres'
 import {
   createEventStreamQueue,
   createQueueClient,
@@ -98,27 +98,8 @@ const configStore =
         ...(cloud ? { decorate: (resolved) => cloud.decorateConfig(resolved) } : {}),
       })
 
-const previewDb = db
 const trackerConfigStore =
-  configStore === null
-    ? undefined
-    : createTrackerConfigStore(
-        configStore,
-        // Uncached by construction: a draft version's rules must never enter the
-        // ingest-config cache, which real visitors read from (ADR-0034, D6).
-        previewDb === null
-          ? undefined
-          : async (input) => {
-              const rules = await readPreviewRules(previewDb, input)
-              return rules === null
-                ? null
-                : rules.map((row) => ({
-                    ...row.rule,
-                    name: row.eventName,
-                    version: row.version,
-                  }))
-            },
-      )
+  configStore === null ? undefined : createTrackerConfigStore(configStore)
 
 const queueClient =
   env.EVENT_STREAM_REDIS_URL === undefined
@@ -200,9 +181,6 @@ const app = createApp({
   metrics,
   ...(trackerConfigStore === undefined ? {} : { trackerConfigStore }),
   ...(trackerScript === undefined ? {} : { trackerScript }),
-  ...(env.PREVIEW_TOKEN_VERIFY_KEY === undefined
-    ? {}
-    : { previewVerifyKey: env.PREVIEW_TOKEN_VERIFY_KEY }),
   ...(ingest === undefined ? {} : { ingest }),
 })
 

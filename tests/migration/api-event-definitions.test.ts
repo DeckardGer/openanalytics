@@ -1,5 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto'
-import { createAuth, drizzleAuthDatabase, verifyPreviewToken, type Auth } from '@openanalytics/auth'
+import { createAuth, drizzleAuthDatabase, type Auth } from '@openanalytics/auth'
 import { loadServiceEnv } from '@openanalytics/domain'
 import { createServiceMetadata } from '@openanalytics/observability'
 import {
@@ -26,8 +25,7 @@ import { createApp } from '../../apps/api/src/app.ts'
  * - the site-wide published-rule ceiling, which is checked at *publish* and not
  *   at save, and which no single version row can see;
  * - the two 409s having their own codes and carrying the value a client needs to
- *   recover (`published_version`);
- * - that a preview mints a real, verifiable token and writes no row.
+ *   recover (`published_version`).
  */
 
 const CONNECTION_STRING = process.env['TEST_POSTGRES_URL']
@@ -35,14 +33,6 @@ const describeIfPostgres = CONNECTION_STRING ? describe : describe.skip
 
 const ORIGIN = 'http://localhost:3000'
 const PASSWORD = 'sup3r-secret-pw'
-
-const previewKeys = (() => {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  return {
-    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
-  }
-})()
 
 function content(overrides: Record<string, unknown> = {}) {
   return {
@@ -154,10 +144,7 @@ describeIfPostgres('event definition routes', () => {
       },
     })
 
-    const env = {
-      ...loadServiceEnv('api', testEnv()),
-      PREVIEW_TOKEN_SIGNING_KEY: previewKeys.privateKeyPem,
-    }
+    const env = loadServiceEnv('api', testEnv())
     const service = createServiceMetadata({
       name: 'api',
       version: '0.0.0-test',
@@ -435,59 +422,6 @@ describeIfPostgres('event definition routes', () => {
 
       // Clean up so later tests are not living under a full budget.
       await req('DELETE', `/v1/sites/${siteId}/event-definitions/${bigId}`, undefined, ownerCookie)
-    })
-  })
-
-  describe('preview', () => {
-    it('mints a token the collector can verify, and writes no row', async () => {
-      const def = await makeDefinition()
-
-      const before = await pool.query<{ n: string }>(
-        'SELECT count(*)::text AS n FROM event_definition_versions',
-      )
-
-      const preview = await post(
-        `/v1/sites/${siteId}/event-definitions/${def.id}/preview`,
-        { version: 1 },
-        ownerCookie,
-      )
-      expect(preview.status).toBe(200)
-      const body = (await preview.json()) as { token: string; version: number }
-
-      const verified = verifyPreviewToken(body.token, {
-        verifyKey: previewKeys.publicKeyPem,
-        now: new Date(),
-      })
-      expect(verified.ok).toBe(true)
-      if (!verified.ok) return
-      expect(verified.claims.site_id).toBe(siteId)
-      expect(verified.claims.definition_id).toBe(def.id)
-      expect(verified.claims.version).toBe(1)
-
-      const after = await pool.query<{ n: string }>(
-        'SELECT count(*)::text AS n FROM event_definition_versions',
-      )
-      expect(after.rows[0]?.n).toBe(before.rows[0]?.n)
-    })
-
-    it('is a write-class act: a viewer cannot start one', async () => {
-      const def = await makeDefinition()
-      const preview = await post(
-        `/v1/sites/${siteId}/event-definitions/${def.id}/preview`,
-        { version: 1 },
-        viewerCookie,
-      )
-      expect(preview.status).toBe(403)
-    })
-
-    it('404s for a version that does not exist', async () => {
-      const def = await makeDefinition()
-      const preview = await post(
-        `/v1/sites/${siteId}/event-definitions/${def.id}/preview`,
-        { version: 77 },
-        ownerCookie,
-      )
-      expect(preview.status).toBe(404)
     })
   })
 

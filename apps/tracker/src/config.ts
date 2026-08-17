@@ -108,15 +108,6 @@ export interface ConfigLoaderDeps {
   readonly storage: SafeStorage
   readonly now: () => number
   readonly fetchImpl?: (url: string, init: RequestInit) => Promise<Response>
-  /**
-   * A rule-preview token from the page URL (ADR-0034, D6).
-   *
-   * Its presence changes three things: the request carries it, the response is
-   * this page's *draft* rules rather than the published set, and nothing is read
-   * from or written to the local cache. A preview must not displace the real
-   * configuration for the next ordinary page load.
-   */
-  readonly previewToken?: string | undefined
 }
 
 function readCache(storage: SafeStorage): CachedConfig | null {
@@ -136,8 +127,7 @@ function readCache(storage: SafeStorage): CachedConfig | null {
 export async function loadTrackerConfig(
   deps: ConfigLoaderDeps,
 ): Promise<TrackerConfigPatch | null> {
-  const preview = deps.previewToken
-  const cached = preview ? null : readCache(deps.storage)
+  const cached = readCache(deps.storage)
 
   if (cached && deps.now() - cached.at < CONFIG_CACHE_TTL_MS) {
     return toRuntimeConfig(cached.body)
@@ -148,7 +138,7 @@ export async function loadTrackerConfig(
 
   const url = `${deps.collectorUrl.replace(/\/+$/, '')}/v1/tracker/config?key=${encodeURIComponent(
     deps.trackingKey,
-  )}${preview ? `&preview=${encodeURIComponent(preview)}` : ''}`
+  )}`
 
   try {
     const response = await fetchImpl(url, {
@@ -166,16 +156,10 @@ export async function loadTrackerConfig(
     if (!response.ok) return cached ? toRuntimeConfig(cached.body) : null
 
     const body = (await response.json()) as TrackerConfigResponse
-    // A preview is never cached, at any layer — the server says `no-store` and
-    // this is the other half of it. A draft rule set written here would be
-    // served to the next ordinary page load from localStorage, long after the
-    // preview session ended.
-    if (!preview) {
-      deps.storage.set(
-        CONFIG_KEY,
-        JSON.stringify({ etag: response.headers.get('etag'), at: deps.now(), body }),
-      )
-    }
+    deps.storage.set(
+      CONFIG_KEY,
+      JSON.stringify({ etag: response.headers.get('etag'), at: deps.now(), body }),
+    )
     return toRuntimeConfig(body)
   } catch {
     // Offline, blocked or malformed: the tracker keeps working on defaults or

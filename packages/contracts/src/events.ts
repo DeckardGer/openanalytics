@@ -166,7 +166,11 @@ export const eventPageSchema = z.strictObject({
 export const clientContextSchema = z.strictObject({
   sdk: z.enum(['web', 'node', 'wordpress', 'mobile']),
   sdk_version: z.string().min(1).max(EVENT_LIMITS.sdkVersionMaxLength),
-  /** Marks non-production traffic; the server keeps it out of billable usage. */
+  /**
+   * Deprecated and ignored (ADR-0068). Old snippets still send it, so the field
+   * stays accepted — `strictObject` would 400 them off the air — but the server
+   * treats the traffic as ordinary: visible and billable.
+   */
   test_mode: z.boolean().optional(),
 })
 
@@ -452,18 +456,6 @@ export const persistedEventSchema = z.strictObject({
   billing_grace: z.boolean(),
   /** Server-computed usage class (D-101). Never echoed from the request. */
   billable: z.boolean(),
-  /**
-   * Non-production traffic (ADR-0034, D6). **Server-set**, from
-   * `context.test_mode` or a valid preview session — the client's claim is an
-   * input to that decision, never the decision.
-   *
-   * It decides which table the worker writes to: `true` routes the event to
-   * `events_preview`, which no chart, rollup, session fact or realtime board
-   * reads. That is what makes the claim worthless to forge — a forger buys
-   * themselves 0 usage and 0 dashboard — and it is why the field can stay
-   * client-settable rather than needing a server-side gate of its own.
-   */
-  test_mode: z.boolean(),
   /**
    * The no-code rule that produced this event, or `null` (ADR-0034, D5).
    *

@@ -14,16 +14,6 @@ import type { PersistedEvent } from '@openanalytics/contracts'
 export const EVENTS_RAW_TABLE = 'events_raw'
 
 /**
- * Where preview and test-mode traffic lands instead (ADR-0034, D6).
- *
- * A separate table rather than a filtered column, so the thirteen materialized
- * views over `events_raw` -- and the sessionizer, and every gateway operation --
- * exclude it by construction rather than by a WHERE clause each of them has to
- * remember.
- */
-export const EVENTS_PREVIEW_TABLE = 'events_preview'
-
-/**
  * Prefix for server-owned keys folded into the properties JSON.
  *
  * The M4 contract reserves it: `propertyKeySchema` rejects any client property
@@ -182,13 +172,6 @@ export interface ToEventsRawRowOptions {
   readonly origin?: EventSourceOrigin
 }
 
-/** The extra columns `events_preview` carries (ADR-0034, D6). */
-export interface EventsPreviewRow extends EventsRawRow {
-  readonly preview_version: number
-  /** `site` for a whole site in test mode, `rule` for a dashboard preview. */
-  readonly preview_kind: 'site' | 'rule'
-}
-
 /**
  * Envelope to row.
  *
@@ -197,26 +180,6 @@ export interface EventsPreviewRow extends EventsRawRow {
  * column costs a second mark stream on every read for a distinction the type
  * column already makes (migration 0001).
  */
-/**
- * Envelope to preview row (ADR-0034, D6).
- *
- * The same projection as `toEventsRawRow` plus the three columns a preview
- * surface reads. `preview_kind` distinguishes a whole site running in test mode
- * -- the smoke fixture, a staging deployment -- from one dashboard preview
- * session, which is the difference between "ignore this site's traffic" and
- * "show me what this rule just did".
- */
-export function toEventsPreviewRow(
-  event: PersistedEvent,
-  options: ToEventsRawRowOptions,
-): EventsPreviewRow {
-  return {
-    ...toEventsRawRow(event, options),
-    preview_version: event.rule_version ?? 0,
-    preview_kind: event.rule_id === null ? 'site' : 'rule',
-  }
-}
-
 export function toEventsRawRow(
   event: PersistedEvent,
   options: ToEventsRawRowOptions,

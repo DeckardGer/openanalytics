@@ -249,13 +249,14 @@ describeIfPostgres('site deletion', () => {
       // `custom_event_samples_*` tables (migration 0021) and books 62; ADR-0045
       // D8 adds `widgets` (Postgres migration 0048) and books **63** — one table
       // and not two, because a widget's origin allowlist is a bounded `text[]`
-      // on the row rather than a child table.
+      // on the row rather than a child table. ADR-0068 removes `events_preview`
+      // again (migration 0022 drops it), the first shrink: **62**.
       // Still no `stripe` row: a site deletion cancels no subscription, because
       // the site is one of several a payer may fund.
-      // 63, not 64: `billing_transfer_offers` is a target the hosted surface registers (`CLOUD_DELETION_EXTENSION`), so this is the set a build without it erases.
-      expect(targets).toHaveLength(63)
+      // 62, not 63: `billing_transfer_offers` is a target the hosted surface registers (`CLOUD_DELETION_EXTENSION`), so this is the set a build without it erases.
+      expect(targets).toHaveLength(62)
       const byStore = (store: string) => targets.filter((t) => t.store === store).length
-      expect(byStore('clickhouse')).toBe(35)
+      expect(byStore('clickhouse')).toBe(34)
       expect(byStore('redis')).toBe(5)
       expect(byStore('postgres')).toBe(22)
       expect(byStore('stripe')).toBe(0)

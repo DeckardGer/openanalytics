@@ -1,10 +1,5 @@
 import { createClient, type ClickHouseClient } from '@clickhouse/client'
-import {
-  EVENTS_PREVIEW_TABLE,
-  EVENTS_RAW_TABLE,
-  type EventsPreviewRow,
-  type EventsRawRow,
-} from './events-raw.ts'
+import { EVENTS_RAW_TABLE, type EventsRawRow } from './events-raw.ts'
 
 /**
  * The worker's insert path (docs snapshot 02 §7.5; 05 D-209 step 4).
@@ -107,18 +102,6 @@ export interface EventsIngest {
     options: { readonly token: string },
   ): Promise<InsertEventsResult>
   /**
-   * Preview and test-mode rows, into their own table (ADR-0034, D6).
-   *
-   * A separate method rather than a flag on `insertEvents`, because the two are
-   * separate inserts against separate deduplication scopes: the token is scoped
-   * per destination table, so one batch containing both kinds must present it
-   * to each table once. A single call with a mixed array could not.
-   */
-  insertPreviewEvents(
-    rows: readonly EventsPreviewRow[],
-    options: { readonly token: string },
-  ): Promise<InsertEventsResult>
-  /**
    * Billable row counts per batch, for the reconciliation job (plan Milestone 6
    * item 11).
    *
@@ -147,16 +130,12 @@ export interface EventsIngestOptions {
    */
   readonly requestTimeoutMs?: number
   readonly table?: string
-  /** Overridable for the same reason `table` is: a migration test points both
-   * at a scratch schema. */
-  readonly previewTable?: string
 }
 
 export const DEFAULT_INSERT_TIMEOUT_MS = 30_000
 
 export function createEventsIngest(options: EventsIngestOptions): EventsIngest {
   const table = options.table ?? EVENTS_RAW_TABLE
-  const previewTable = options.previewTable ?? EVENTS_PREVIEW_TABLE
   const client: ClickHouseClient = createClient({
     url: options.url,
     username: options.username,
@@ -210,12 +189,6 @@ export function createEventsIngest(options: EventsIngestOptions): EventsIngest {
   return {
     async insertEvents(rows, { token }): Promise<InsertEventsResult> {
       return insertInto(table, rows, token)
-    },
-
-    async insertPreviewEvents(rows, { token }): Promise<InsertEventsResult> {
-      // The same token against a different table. Deduplication is scoped per
-      // destination, so a retry of a mixed batch is a no-op on both halves.
-      return insertInto(previewTable, rows, token)
     },
 
     async countBillableByBatch(batchIds: readonly string[]): Promise<Map<string, number>> {

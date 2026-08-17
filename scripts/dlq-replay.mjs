@@ -25,9 +25,9 @@
  *   fence already refused is not resurrected; and a **tombstone** check against
  *   `sites.status` now, so a site deleted after the incident is not un-deleted
  *   by its own recovery.
- * - Routes `test_mode` rows to `events_preview` and everything else to
- *   `events_raw` (ADR-0034 D6) — replaying preview traffic into the production
- *   table would push it through thirteen materialized views.
+ * - Skips any legacy payload persisted with `test_mode: true` (pre-ADR-0068
+ *   envelopes; their destination table no longer exists) and counts the skips,
+ *   so a replay says out loud how much it left behind.
  * - Writes **nothing** to Postgres. The manifest stays `dead_lettered`, which is
  *   the truthful record, and — the consequence worth stating plainly — **the
  *   usage those events would have billed is never recorded.** A dead-lettered
@@ -55,7 +55,7 @@ const REPO = process.env.REPLAY_REPO_ROOT ?? '/repo'
 const { createPool, createDatabase, getManifest, listBatchSites } = await import(
   `${REPO}/packages/postgres/dist/index.js`
 )
-const { createEventsIngest, toEventsPreviewRow, toEventsRawRow } = await import(
+const { createEventsIngest, toEventsRawRow } = await import(
   `${REPO}/packages/clickhouse/dist/index.js`
 )
 const { createQueueClient } = await import(`${REPO}/packages/redis/dist/index.js`)
@@ -120,9 +120,8 @@ const summary = {
   droppedStoredFence: 0,
   droppedTombstone: 0,
   rowsRaw: 0,
-  rowsPreview: 0,
+  droppedLegacyTestMode: 0,
   rowsInserted: 0,
-  previewRowsInserted: 0,
   insertErrors: [],
   perBatch: [],
 }
@@ -156,7 +155,6 @@ try {
       dlqEntries: dlqEntries.length,
       reason: dlqEntries[0]?.reason ?? null,
       rowsRaw: 0,
-      rowsPreview: 0,
       inserted: false,
     }
 
@@ -194,7 +192,6 @@ try {
     )
 
     const rows = []
-    const previewRows = []
     for (const entry of ordered) {
       let parsed
       try {
@@ -217,24 +214,24 @@ try {
         summary.droppedTombstone += 1
         continue
       }
-      if (event.test_mode) previewRows.push(toEventsPreviewRow(event, { batchId }))
-      else rows.push(toEventsRawRow(event, { batchId }))
+      if (event.test_mode) {
+        // A pre-ADR-0068 envelope. Its destination table is gone and the
+        // traffic it marked was never customer-visible; skipping is the honest
+        // replay of "this row would not have surfaced anywhere".
+        summary.droppedLegacyTestMode += 1
+        continue
+      }
+      rows.push(toEventsRawRow(event, { batchId }))
     }
 
     outcome.rowsRaw = rows.length
-    outcome.rowsPreview = previewRows.length
     summary.rowsRaw += rows.length
-    summary.rowsPreview += previewRows.length
 
     if (MODE === 'execute') {
       try {
         if (rows.length > 0) {
           const result = await clickhouse.insertEvents(rows, { token: batchId })
           summary.rowsInserted += result.rows ?? rows.length
-        }
-        if (previewRows.length > 0) {
-          const result = await clickhouse.insertPreviewEvents(previewRows, { token: batchId })
-          summary.previewRowsInserted += result.rows ?? previewRows.length
         }
         outcome.inserted = true
         summary.batchesReplayed += 1

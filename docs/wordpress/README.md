@@ -124,7 +124,7 @@ session. Render exactly:
   pageview immediately and folds in the site's configuration afterwards.
 
 See [`../frontend/tracker_snippet.md`](../frontend/tracker_snippet.md) for the
-optional attributes (`data-test-mode`, consent flags, `data-oa-event`).
+optional attributes (consent flags, `data-oa-event`).
 
 ### The config cache
 

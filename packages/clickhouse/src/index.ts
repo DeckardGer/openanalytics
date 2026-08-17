@@ -7,7 +7,6 @@ export {
 } from './migrate.ts'
 
 export {
-  EVENTS_PREVIEW_TABLE,
   EVENTS_RAW_TABLE,
   EVENT_SOURCE_ORIGINS,
   MAX_PROPERTIES_BYTES,
@@ -15,10 +14,8 @@ export {
   foldServerPayload,
   serializeProperties,
   toClickHouseDateTime64,
-  toEventsPreviewRow,
   toEventsRawRow,
   type EventSourceOrigin,
-  type EventsPreviewRow,
   type EventsRawRow,
   type ToEventsRawRowOptions,
 } from './events-raw.ts'

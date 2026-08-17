@@ -1,5 +1,4 @@
 import { ApiError } from '@openanalytics/contracts'
-import { signPreviewToken, PREVIEW_TOKEN_TTL_SECONDS } from '@openanalytics/auth'
 import {
   createEventDefinitionRequestSchema,
   createEventDefinitionVersionRequestSchema,
@@ -14,7 +13,6 @@ import {
   listEventDefinitionVersions,
   listEventDefinitions,
   listPublishedRules,
-  newId,
   publishEventDefinition,
   rollbackEventDefinition,
   saveEventDefinitionVersion,
@@ -53,15 +51,6 @@ type Env = { Variables: ApiVariables }
 
 export interface EventDefinitionRoutesDeps {
   readonly db: Database
-  /**
-   * Ed25519 signing key for preview tokens (`PREVIEW_TOKEN_SIGNING_KEY`).
-   *
-   * Absent, the preview route answers `SERVICE_UNAVAILABLE` rather than 404:
-   * an unconfigured deployment is an operator problem, and a client must be
-   * able to tell "previews are not set up here" from "no such definition".
-   */
-  readonly previewSigningKey?: string | undefined
-  readonly now?: (() => Date) | undefined
 }
 
 function definitionJson(definition: EventDefinitionRecord) {
@@ -207,7 +196,6 @@ async function assertSiteRuleBudget(
 
 export function createEventDefinitionRoutes(deps: EventDefinitionRoutesDeps): Hono<Env> {
   const { db } = deps
-  const now = deps.now ?? (() => new Date())
   const app = new Hono<Env>()
 
   const base = '/sites/:site_id/event-definitions'
@@ -428,60 +416,6 @@ export function createEventDefinitionRoutes(deps: EventDefinitionRoutesDeps): Ho
       source_version: outcome.version.sourceVersion,
       config_version: outcome.configVersion,
       version: versionJson(outcome.version),
-    })
-  })
-
-  /**
-   * Starts a preview of one version against the caller's real site.
-   *
-   * Returns a short-lived signed token and nothing else — no row is written
-   * (ADR-0034, D6). The dashboard appends it to the site's own URL; the
-   * collector verifies it on `GET /v1/tracker/config` and answers with this
-   * draft instead of the published rule set.
-   *
-   * `site:settings` rather than membership: a preview puts unpublished rules
-   * into a real browser on the customer's real site, which is the same class of
-   * act as publishing them, briefly.
-   */
-  app.post(`${base}/:definition_id/preview`, requireCapability('site:settings'), async (c) => {
-    const actor = c.get('user')
-    const { siteId } = c.get('membership')
-    const definitionId = c.req.param('definition_id') as string
-
-    if (!deps.previewSigningKey) {
-      throw new ApiError('SERVICE_UNAVAILABLE', 'Rule preview is not configured', {
-        details: { reason: 'preview_signing_key_missing' },
-      })
-    }
-
-    const body = await readJson(c)
-    const rawVersion = body['version']
-    if (typeof rawVersion !== 'number' || !Number.isInteger(rawVersion) || rawVersion < 1) {
-      throw new ApiError('VALIDATION_FAILED', 'version must be a positive integer')
-    }
-
-    const version = await getEventDefinitionVersion(db, {
-      definitionId,
-      siteId,
-      version: rawVersion,
-    })
-    if (!version) throw new ApiError('NOT_FOUND', 'No such version of this event definition')
-
-    const issuedAt = now()
-    const token = signPreviewToken({
-      privateKeyPem: deps.previewSigningKey,
-      siteId,
-      definitionId,
-      version: rawVersion,
-      subject: actor.id,
-      issuedAt,
-      jti: newId(),
-    })
-
-    return c.json({
-      token,
-      expires_at: new Date(issuedAt.getTime() + PREVIEW_TOKEN_TTL_SECONDS * 1000).toISOString(),
-      version: rawVersion,
     })
   })
 

@@ -3145,41 +3145,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/sites/{site_id}/event-definitions/{definition_id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                site_id: components["parameters"]["SiteIdPath"];
-                definition_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start a preview of an unpublished version. Requires `site:settings`.
-         * @description Returns a short-lived signed token and writes nothing. Append it to the
-         *     site's own URL as `?oa_preview=<token>` and load the page: the tracker
-         *     passes it to `GET /v1/tracker/config`, which answers with **this draft
-         *     version's rules** instead of the published set, uncached.
-         *
-         *     Events produced during a preview are marked `test_mode`. They are
-         *     non-billable and are excluded from every production read path — the
-         *     chart, the rollups, the realtime board and the usage ledger — so a
-         *     preview can be run against a real production site without polluting it.
-         *
-         *     `site:settings` rather than plain membership, because a preview puts
-         *     unpublished rules into a real browser on the customer's real site, which
-         *     is the same class of act as publishing them, briefly.
-         */
-        post: operations["previewSiteEventDefinition"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/imports/providers": {
         parameters: {
             query?: never;
@@ -5143,7 +5108,12 @@ export interface components {
             /** @enum {string} */
             sdk: "web" | "node" | "wordpress" | "mobile";
             sdk_version: string;
-            /** @description Marks non-production traffic; kept out of billable usage. */
+            /**
+             * @deprecated
+             * @description Deprecated and ignored (ADR-0068). Old snippets still send it, so
+             *     the field stays accepted; the traffic is ordinary — visible and
+             *     billable.
+             */
             test_mode?: boolean;
         };
         /**
@@ -5600,11 +5570,9 @@ export interface components {
                 /** @description The canonical event name a match produces. */
                 name: components["schemas"]["EventName"];
                 /**
-                 * @description The definition version this rule came from. Sent so a preview
-                 *     and a published rule set are distinguishable in the events
-                 *     they produce, and so "which rules was this browser running"
-                 *     has an answer that does not depend on guessing from the
-                 *     config epoch.
+                 * @description The definition version this rule came from, so "which rules
+                 *     was this browser running" has an answer that does not depend
+                 *     on guessing from the config epoch.
                  */
                 version: number;
                 /** @enum {string} */
@@ -12288,63 +12256,6 @@ export interface operations {
             };
             /** @description Someone else published first (`EVENT_DEFINITION_VERSION_CONFLICT`). */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-        };
-    };
-    previewSiteEventDefinition: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                site_id: components["parameters"]["SiteIdPath"];
-                definition_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description The version to preview. Usually an unpublished draft. */
-                    version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description A preview token, valid for 15 minutes. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description Opaque to the client; pass it through as `oa_preview`. */
-                        token: string;
-                        /** Format: date-time */
-                        expires_at: string;
-                        version: number;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationFailed"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["Forbidden"];
-            /** @description No such definition or version (`NOT_FOUND`). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description This deployment has no preview signing key (`SERVICE_UNAVAILABLE`). */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };

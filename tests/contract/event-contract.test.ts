@@ -90,10 +90,8 @@ describe('client cannot state server-owned fields', () => {
       // it can be reconciled only for the user who was blocked.
       billing_grace: false,
       billable: true,
-      // ADR-0034 D6/D5: both server-set. `test_mode` decides which ClickHouse
-      // table the event lands in, and `rule_id` is only ever a rule the site
+      // ADR-0034 D5: server-set. `rule_id` is only ever a rule the site
       // actually publishes -- the client's claim is checked, not carried.
-      test_mode: false,
       rule_id: null,
       rule_version: null,
       anonymous_id: 'anon_1',

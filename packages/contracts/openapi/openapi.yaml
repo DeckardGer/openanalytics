@@ -4209,81 +4209,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /v1/sites/{site_id}/event-definitions/{definition_id}/preview:
-    parameters:
-      - $ref: '#/components/parameters/SiteIdPath'
-      - name: definition_id
-        in: path
-        required: true
-        schema:
-          type: string
-    post:
-      operationId: previewSiteEventDefinition
-      tags: [analytics]
-      summary: Start a preview of an unpublished version. Requires `site:settings`.
-      description: |
-        Returns a short-lived signed token and writes nothing. Append it to the
-        site's own URL as `?oa_preview=<token>` and load the page: the tracker
-        passes it to `GET /v1/tracker/config`, which answers with **this draft
-        version's rules** instead of the published set, uncached.
-
-        Events produced during a preview are marked `test_mode`. They are
-        non-billable and are excluded from every production read path — the
-        chart, the rollups, the realtime board and the usage ledger — so a
-        preview can be run against a real production site without polluting it.
-
-        `site:settings` rather than plain membership, because a preview puts
-        unpublished rules into a real browser on the customer's real site, which
-        is the same class of act as publishing them, briefly.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [version]
-              properties:
-                version:
-                  type: integer
-                  minimum: 1
-                  description: The version to preview. Usually an unpublished draft.
-      responses:
-        '200':
-          description: A preview token, valid for 15 minutes.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required: [token, expires_at, version]
-                properties:
-                  token:
-                    type: string
-                    description: Opaque to the client; pass it through as `oa_preview`.
-                  expires_at:
-                    type: string
-                    format: date-time
-                  version:
-                    type: integer
-        '400':
-          $ref: '#/components/responses/ValidationFailed'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          description: No such definition or version (`NOT_FOUND`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '503':
-          description: This deployment has no preview signing key (`SERVICE_UNAVAILABLE`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
   /v1/imports/providers:
     get:
       operationId: listImportProviders
@@ -7225,7 +7150,11 @@ components:
           maxLength: 32
         test_mode:
           type: boolean
-          description: Marks non-production traffic; kept out of billable usage.
+          deprecated: true
+          description: |
+            Deprecated and ignored (ADR-0068). Old snippets still send it, so
+            the field stays accepted; the traffic is ordinary — visible and
+            billable.
 
     InteractionPayload:
       type: object
@@ -7981,11 +7910,9 @@ components:
                 type: integer
                 minimum: 1
                 description: |
-                  The definition version this rule came from. Sent so a preview
-                  and a published rule set are distinguishable in the events
-                  they produce, and so "which rules was this browser running"
-                  has an answer that does not depend on guessing from the
-                  config epoch.
+                  The definition version this rule came from, so "which rules
+                  was this browser running" has an answer that does not depend
+                  on guessing from the config epoch.
               trigger:
                 type: string
                 enum: [click, submit, url_pattern]
