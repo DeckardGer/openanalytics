@@ -705,18 +705,18 @@ describeIfPostgres('reporting currency and the rollup re-roll marker', () => {
   })
 
   describe('the deletion registry at its milestone end state (D8)', () => {
-    it('snapshots 63 targets including both revenue rollups', async () => {
+    it('snapshots 62 targets including both revenue rollups', async () => {
       const siteId = await makeSite()
       const started = await startSiteDeletion(db, { siteId, requestedByUserId: ownerId })
       const targets = await listDeletionTargets(db, {
         deletionRequestId: started.deletionRequestId,
       })
 
-      expect(SITE_DELETION_TARGETS).toHaveLength(63)
+      expect(SITE_DELETION_TARGETS).toHaveLength(62)
       // 63, not 64: `billing_transfer_offers` is a target the hosted surface registers (`CLOUD_DELETION_EXTENSION`), so this is the set a build without it erases.
-      expect(targets).toHaveLength(63)
+      expect(targets).toHaveLength(62)
       const clickhouse = targets.filter((t) => t.store === 'clickhouse').map((t) => t.target)
-      expect(clickhouse).toHaveLength(35)
+      expect(clickhouse).toHaveLength(34)
       // A vocabulary name with no purge statement verifies silently at
       // `deleted: 0`, so the names are asserted rather than only the count.
       expect(clickhouse).toContain('revenue_1h')

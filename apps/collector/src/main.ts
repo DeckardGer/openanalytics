@@ -98,8 +98,7 @@ const configStore =
         ...(cloud ? { decorate: (resolved) => cloud.decorateConfig(resolved) } : {}),
       })
 
-const trackerConfigStore =
-  configStore === null ? undefined : createTrackerConfigStore(configStore)
+const trackerConfigStore = configStore === null ? undefined : createTrackerConfigStore(configStore)
 
 const queueClient =
   env.EVENT_STREAM_REDIS_URL === undefined

@@ -1,9 +1,5 @@
 import { persistedEventSchema, type PersistedEvent } from '@openanalytics/contracts'
-import {
-  ClickHouseInsertError,
-  toEventsRawRow,
-  type EventsRawRow,
-} from '@openanalytics/clickhouse'
+import { ClickHouseInsertError, toEventsRawRow, type EventsRawRow } from '@openanalytics/clickhouse'
 import { recoveryActionFor, retryDelayMs, type IngestBatchState } from '@openanalytics/domain'
 import {
   applyBatchUsage,
