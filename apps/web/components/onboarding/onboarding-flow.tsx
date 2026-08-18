@@ -36,8 +36,11 @@ import { MOCK_CREATED_SITE } from "@/lib/mock";
  * footer language.
  *
  * The steps are a *list*, not four numbered branches, because a deployment can
- * add one: the hosted build inserts plan selection before verification
- * (`@seam/slots`), which is why the counter says "x / 4" here and "x / 5" there.
+ * add one: the hosted build appends plan selection after verification
+ * (`@seam/slots`), which is why the counter says "x / 4" here and "x / 5"
+ * there. Last on purpose (Abbas, 2026-08-18, after test-driving the trial
+ * himself): the snippet is the priority, and the plan ask lands once the
+ * setup work is done, when saying yes is the natural next move.
  * Everything else — the springs, the measured panel, the footer — is written
  * once against whatever the list turns out to be.
  *
@@ -86,8 +89,8 @@ const STEPS: readonly Step[] = [
   "site",
   "timezone",
   "install",
-  ...(onboardingStep ? (["extra"] as const) : []),
   "verify",
+  ...(onboardingStep ? (["extra"] as const) : []),
 ];
 
 const stepTitle = (step: Step): string =>
@@ -214,9 +217,6 @@ export function OnboardingFlow() {
     setStep(next);
   };
 
-  /** The step after the snippet — the optional one where it exists. */
-  const afterInstall: Step = onboardingStep ? "extra" : "verify";
-
   const slug = created?.slug ?? slugify(name) ?? "site";
   const publicToken =
     created?.tracking_key.public_token ??
@@ -286,6 +286,21 @@ export function OnboardingFlow() {
     router.replace(`/dashboard/${encodeURIComponent(slug)}`);
   }, [session, router, slug]);
 
+  /**
+   * Where a settled verify goes: the optional step where the build has one,
+   * else out to the dashboard. Also the verify step's "I'll do this later"
+   * exit, so a person who cannot deploy the snippet right now still meets
+   * the plan step instead of skipping past it.
+   */
+  const leaveVerify = React.useCallback(() => {
+    if (onboardingStep) {
+      setDir(1);
+      setStep("extra");
+    } else {
+      finish();
+    }
+  }, [finish]);
+
   // The verify step in mock mode plays the first event arriving on a timer.
   React.useEffect(() => {
     if (step !== "verify" || LIVE_API) return;
@@ -322,11 +337,14 @@ export function OnboardingFlow() {
     };
   }, [step, created, connected]);
 
+  // A settled connection advances by itself: out of the flow, or into the
+  // plan step where the build has one. Gated on the step so sitting on the
+  // plan step with a connected site does not keep re-firing the move.
   React.useEffect(() => {
-    if (!connected) return;
-    const redirect = setTimeout(() => finish(), 1400);
+    if (!connected || step !== "verify") return;
+    const redirect = setTimeout(() => leaveVerify(), 1400);
     return () => clearTimeout(redirect);
-  }, [connected, finish]);
+  }, [connected, step, leaveVerify]);
 
   // Below every hook, so the early return cannot change the hook order.
   // Holding the first paint rather than opening on step one and jumping:
@@ -497,7 +515,7 @@ export function OnboardingFlow() {
                   transition={SPRING}
                   className="flex flex-col gap-2.5 p-4"
                 >
-                  <onboardingStep.Body onDone={() => goTo("verify")} />
+                  <onboardingStep.Body onDone={finish} />
                 </motion.div>
               )}
               {step === "verify" && (
@@ -585,7 +603,9 @@ export function OnboardingFlow() {
                     </p>
                     <p className="mt-1 max-w-64 text-xs leading-5 text-muted-foreground">
                       {connected
-                        ? "Taking you to your project."
+                        ? onboardingStep
+                          ? "One more step and you're in."
+                          : "Taking you to your project."
                         : !siteActive
                           ? // The site is not open for events yet — no
                             // snippet is wrong yet, and the copy must not say
@@ -626,12 +646,15 @@ export function OnboardingFlow() {
               </Button>
             )}
             {step === "install" && (
-              <Button size="xs" onClick={() => goTo(afterInstall)}>
+              <Button size="xs" onClick={() => goTo("verify")}>
                 Continue
               </Button>
             )}
             {step === "extra" && onboardingStep && (
               <>
+                {/* Back skips over verify to the snippet: a connected verify
+                    advances itself, so landing on it would bounce straight
+                    back here. */}
                 <Button
                   variant="secondary"
                   size="xs"
@@ -644,9 +667,6 @@ export function OnboardingFlow() {
             )}
             {step === "verify" && (
               <>
-                {/* Back goes to the snippet, never to the optional step: that
-                    one advances itself, so landing on it already satisfied
-                    would bounce straight back here. */}
                 <Button
                   variant="secondary"
                   size="xs"
@@ -654,8 +674,21 @@ export function OnboardingFlow() {
                 >
                   Back
                 </Button>
-                <Button size="xs" loading={!connected} onClick={finish}>
-                  {connected ? "Go to project" : "Waiting…"}
+                {!connected ? (
+                  // The waiting must be leavable: the snippet may not be
+                  // deployable today, and moving on is forward, never out,
+                  // so the plan step still gets its moment on the hosted
+                  // build.
+                  <Button size="xs" variant="secondary" onClick={leaveVerify}>
+                    I&apos;ll do this later
+                  </Button>
+                ) : null}
+                <Button size="xs" loading={!connected} onClick={leaveVerify}>
+                  {connected
+                    ? onboardingStep
+                      ? "Continue"
+                      : "Go to project"
+                    : "Waiting…"}
                 </Button>
               </>
             )}
