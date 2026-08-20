@@ -14,8 +14,12 @@ the four domains is yours to switch on, and it takes a redeploy. Where
 [COOLIFY.md](COOLIFY.md) says "measured", this file now says it too. The
 catalogue submission
 ([Dokploy/templates#1094](https://github.com/Dokploy/templates/pull/1094)) is
-the last open piece; until it lands, § 1's import path is the way in, and the
-PR's preview link shows the template card as the catalogue will render it.
+the last open piece. Until it lands, § 1's import path is the way in, and the
+[PR's preview build](https://uaghazade1-openanalytics.templates-70k.pages.dev)
+already renders the template card, Deploy flow included; it hands you the
+same config § 1 links. It is a `pages.dev` address, which some networks
+block, and it retires when the PR merges; § 1's raw file is the same bytes
+from this repository, always.
 
 ## Before you start
 
