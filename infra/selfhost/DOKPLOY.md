@@ -12,8 +12,10 @@ healthy last). The one step the platform cannot take for you became § 5:
 Dokploy's template format has no way to request TLS certificates, so HTTPS on
 the four domains is yours to switch on, and it takes a redeploy. Where
 [COOLIFY.md](COOLIFY.md) says "measured", this file now says it too. The
-catalogue submission is the last open piece; until it lands, § 1's import
-path is the way in.
+catalogue submission
+([Dokploy/templates#1094](https://github.com/Dokploy/templates/pull/1094)) is
+the last open piece; until it lands, § 1's import path is the way in, and the
+PR's preview link shows the template card as the catalogue will render it.
 
 ## Before you start
 
