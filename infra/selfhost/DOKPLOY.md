@@ -36,8 +36,9 @@ search for "Open Analytics", deploy.
 **Before that (or to run a newer blueprint than the catalogue carries):**
 create a **Compose** service, open **Advanced → Import**, and paste the
 blueprint's Base64 config. It ships next to the blueprint as
-[`dokploy/import.base64.txt`](dokploy/import.base64.txt): open the raw file on
-GitHub, select all, copy. (Once the catalogue submission lands, the templates
+[`dokploy/import.base64.txt`](dokploy/import.base64.txt); the copyable form is
+[**the raw file**](https://raw.githubusercontent.com/OpenLabs-so/openanalytics/main/infra/selfhost/dokploy/import.base64.txt),
+which opens as plain text: select all, copy, done. (Once the catalogue submission lands, the templates
 site renders the same config on the template card.) The file is regenerated
 whenever the blueprint changes; if you modify the blueprint yourself,
 regenerate it from inside `dokploy/`:
