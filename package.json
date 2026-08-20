@@ -1,6 +1,6 @@
 {
   "name": "openanalytics",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Open Analytics — durable analytics ingest, control plane and read contracts.",

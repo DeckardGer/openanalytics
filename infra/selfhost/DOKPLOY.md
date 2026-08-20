@@ -4,11 +4,16 @@ The blueprint in [`dokploy/`](dokploy/) deploys the complete stack as one
 Dokploy Compose service: fourteen containers, four public hostnames, every
 secret generated for you.
 
-**Not a supported path yet, and — unlike [COOLIFY.md](COOLIFY.md) — not yet
-written from an install that was done.** This file was written alongside the
-blueprint for the `Dokploy/templates` catalogue submission, and its promises
-are the compose file's promises until the first live install rewrites this
-header. Where COOLIFY.md says "measured", this file can only say "designed".
+**Measured on 2026-08-20**, on a fresh Dokploy over a 4 GB Hetzner instance
+(x86-64, Ubuntu 26.04, plus a 4 GB swapfile): import, deploy, first account,
+first pageview, end to end. The deploy behaved exactly as § 4 promises
+(twelve images, fourteen containers, three clean one-shot exits, `web`
+healthy last). The one step the platform cannot take for you became § 5:
+Dokploy's template format has no way to request TLS certificates, so HTTPS on
+the four domains is yours to switch on, and it takes a redeploy. Where
+[COOLIFY.md](COOLIFY.md) says "measured", this file now says it too. The
+catalogue submission is the last open piece; until it lands, § 1's import
+path is the way in.
 
 ## Before you start
 
@@ -45,7 +50,9 @@ instance that deletes the client-settable identity headers
 (`CF-Connecting-IP` and its family) before anything internal reads them.
 Without it, any visitor could pick their own rate-limit bucket or write their
 own country into your analytics. **Do not repoint a domain at a service
-directly.**
+directly.** Generated or replaced, the domains arrive HTTP-only (Dokploy's
+template format has no field to request a certificate); § 5 turns HTTPS on
+before anything is opened.
 
 To use real hostnames, change **both halves and keep them equal**:
 
@@ -84,10 +91,33 @@ exited**. That is success, not failure: `migrate`, `keygen` and `geoip` are
 one-shot steps that do their work and stop. The other eleven stay up and go
 healthy, `web` last.
 
+## 5. HTTPS, then the first account
+
+The domains arrive HTTP-only, and the stack cannot be used that way: every
+origin the services hand out (auth, CORS, the dashboard's own API base) is
+built as `https://`, so the login page would load and nothing on it would
+work. Two clicks and a redeploy fix it:
+
+1. In the **Domains** tab, edit each of the four domains: HTTPS on,
+   certificate **Let's Encrypt**. The template cannot do this for you;
+   Dokploy's template format has no certificate field.
+2. **Deploy again.** Routing for a Compose service is written as container
+   labels at deploy time, so the toggle alone changes nothing. The redeploy is
+   what adds the `websecure` routers, and the certificates follow within a
+   minute of it (measured: the ACME store went from empty to all four with no
+   further touch). The one-shots re-run idempotently and say so in their logs.
+
 Then open `https://app.<domain>`. A deployment nobody has signed into offers
 to create the first account rather than asking you to sign in. **Do that
 immediately.** The offer is open to whoever asks first and your DNS records
 are public. It closes permanently the moment one account exists.
+
+One thing worth exact typing: create your first site with the domain you will
+really install the snippet on. The collector enforces a per-site origin
+allowlist, so an event from anywhere else is refused as a 403. A mistyped
+domain is edited under the site's settings, and the collector picks the
+change up within half a minute; since `v0.5.0` the setup flow also offers
+"I'll do this later" instead of waiting on that first event.
 
 ## Things that are true here and nowhere else
 
@@ -123,7 +153,7 @@ never to hand the variable to more services.
 
 ## Upgrades
 
-The images are pinned in the compose file (`v0.4.2` today), so a redeploy
+The images are pinned in the compose file (`v0.5.0` today), so a redeploy
 reinstalls the same release. To move: set `OA_IMAGE_TAG` in the Environment
 tab to the release you mean and redeploy — migrations re-run idempotently, the
 keygen and geoip one-shots short-circuit, and nothing regenerates behind your
