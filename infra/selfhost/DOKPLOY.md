@@ -35,8 +35,16 @@ search for "Open Analytics", deploy.
 
 **Before that (or to run a newer blueprint than the catalogue carries):**
 create a **Compose** service, open **Advanced → Import**, and paste the
-blueprint's Base64 config — the templates site renders it on the template card,
-including on the PR preview URL while the submission is open.
+blueprint's Base64 config. It ships next to the blueprint as
+[`dokploy/import.base64.txt`](dokploy/import.base64.txt): open the raw file on
+GitHub, select all, copy. (Once the catalogue submission lands, the templates
+site renders the same config on the template card.) The file is regenerated
+whenever the blueprint changes; if you modify the blueprint yourself,
+regenerate it from inside `dokploy/`:
+
+```sh
+python3 -c 'import json,base64;print(base64.b64encode(json.dumps({"compose":open("docker-compose.yml").read(),"config":open("template.toml").read()}).encode()).decode())' > import.base64.txt
+```
 
 Either way you get the same thing: the compose file, a `.env` filled with
 generated passwords and secrets, the Caddyfile mount, and four generated
