@@ -537,3 +537,34 @@
     opacity: 0.3;
   }
 }
+/* Squircle fallback for engines without `corner-shape` (Safari, Firefox).
+
+   The card silhouette in squircle-card.tsx is drawn twice: an oversized
+   border-radius that `corner-shape: squircle` bends into a continuous
+   curvature corner, and a `shape()` clip-path aligned with it. An engine
+   that drops `corner-shape` is left with the raw circular radius (a 50px
+   blob) fighting the clip's much tighter geometry: border and shadow follow
+   one outline, the paint is cut on another, and every card grows a second
+   contour (observed on Safari, 2026-08-23).
+
+   So engines without corner-shape leave the squircle idea entirely: no
+   clip, and a plain circular radius derived from `--card-clip-radius`, the
+   one knob every surface already tunes per breakpoint. A squircle reads
+   tighter than a circle of the same nominal radius, so the factor stays
+   modest: 1.1x maps the outer frame's 14/20px clip to 15.4/22px arcs and
+   the inset panel's 12/17px to 13.2/18.7px, deliberately shy of Chromium's
+   26/50px squircle (larger factors looked swollen on these engines).
+
+   Unlayered on purpose: it must win over the utility classes (which live
+   in @layer utilities) without !important, including every consumer's own
+   rounded-* override, all of which were sized for the corner-shape look. */
+@supports not (corner-shape: squircle) {
+  [data-slot="squircle-surface"] {
+    clip-path: none;
+    border-radius: calc(var(--card-clip-radius) * 1.1);
+  }
+  [data-slot="squircle-surface"]::before {
+    clip-path: none;
+    border-radius: inherit;
+  }
+}

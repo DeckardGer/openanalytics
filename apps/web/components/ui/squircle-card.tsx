@@ -13,6 +13,14 @@ import { cn } from "@/lib/utils";
  * Apple-style squircle silhouette, ported from the atlas project. The shape
  * comes from a CSS `shape()` clip-path (with `corner-shape: squircle` where
  * supported) — continuous-curvature corners instead of circular arcs.
+ *
+ * Chromium-only, by declaration: engines without `corner-shape` (Safari,
+ * Firefox) are switched to a plain circular radius by an `@supports not`
+ * block in `globals.css`, which also removes this clip-path. Without that
+ * switch the oversized border-radius here renders as a raw 26/50px blob and
+ * fights the clip's tighter geometry, which is exactly the double-contour
+ * Safari bug it exists to prevent. Tune corners on that fallback through
+ * `--card-clip-radius`, never by editing the classes below.
  */
 const cardClipPath =
   "shape(from var(--card-clip-radius) 0px, line to calc(100% - var(--card-clip-radius)) 0px, curve to 100% var(--card-clip-radius) with calc(100% - var(--card-clip-handle)) 0px / 100% var(--card-clip-handle), line to 100% calc(100% - var(--card-clip-radius)), curve to calc(100% - var(--card-clip-radius)) 100% with 100% calc(100% - var(--card-clip-handle)) / calc(100% - var(--card-clip-handle)) 100%, line to var(--card-clip-radius) 100%, curve to 0px calc(100% - var(--card-clip-radius)) with var(--card-clip-handle) 100% / 0px calc(100% - var(--card-clip-handle)), line to 0px var(--card-clip-radius), curve to var(--card-clip-radius) 0px with 0px var(--card-clip-handle) / var(--card-clip-handle) 0px, close)";
