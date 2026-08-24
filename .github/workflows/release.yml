@@ -63,7 +63,7 @@ env:
   REGISTRY: ghcr.io
   # Lower-cased on purpose: the organisation is `OpenLabs-so` and a registry path
   # must be lower case, so `${{ github.repository_owner }}` cannot be used raw.
-  IMAGE_REPO: ghcr.io/openlabs-so/openanalytics
+  IMAGE_REPO: ghcr.io/deckardger/openanalytics
 
 jobs:
   # Cheap and first: a tag that disagrees with the tree is a release nobody can
