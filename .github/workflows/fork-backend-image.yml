@@ -1,0 +1,151 @@
+# fork: builds `ghcr.io/deckardger/openanalytics/backend:<tag>`, the one slim
+# image `infra/selfhost/docker-compose.coolify.yml` runs for all six backend
+# services, from the upstream release of the same tag.
+#
+# The source is upstream's tag, not this fork's `main`: the compose file pins
+# `web`, `clickhouse` and `valkey` to upstream's images by the same
+# `OA_IMAGE_TAG`, so the backend has to be the same release's code and
+# migrations. Only `infra/docker/fork-backend*` and
+# `scripts/fork-backend-check.mjs` come from the fork.
+#
+# Nightly it builds the newest upstream release if it is not built yet, so an
+# upgrade is "bump OA_IMAGE_TAG in Coolify" once the image exists. A release is
+# built once; `rebuild` overwrites it, for a change to the fork's stages.
+#
+# Scheduled and manual runs read this file from the default branch, which is
+# why the fork's changes live on `main`.
+name: Fork backend image
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Upstream release tag, e.g. v0.8.0. Empty means the newest release.
+        required: false
+        default: ''
+      rebuild:
+        description: Rebuild and overwrite an image that already exists.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+# Two runs for the same tag would push over each other.
+concurrency:
+  group: fork-backend-image
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: OpenLabs-so/openanalytics
+  UPSTREAM_IMAGES: ghcr.io/openlabs-so/openanalytics
+  IMAGE: ghcr.io/deckardger/openanalytics/backend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Pick the release
+        id: release
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version="$REQUESTED"
+          if [ -z "$version" ]; then
+            version=$(git ls-remote --tags --refs "https://github.com/$UPSTREAM.git" 'v*' \
+              | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          fi
+          echo "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+            || { echo "::error::not a release tag: '$version'"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Release: $version"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip a release that is already built
+        id: existing
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          REBUILD: ${{ inputs.rebuild }}
+        run: |
+          if [ "$REBUILD" != "true" ] && docker manifest inspect "$IMAGE:$VERSION" > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "$IMAGE:$VERSION already exists; nothing to do."
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.existing.outputs.skip != 'true'
+        with:
+          path: fork
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        if: steps.existing.outputs.skip != 'true'
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ steps.release.outputs.version }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Build
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          fork/infra/docker/fork-backend-dockerfile.sh \
+            upstream/infra/docker/node-app.Dockerfile \
+            fork/infra/docker/fork-backend.stages > backend.Dockerfile
+          docker buildx build --load --platform linux/amd64 --target backend \
+            -f backend.Dockerfile \
+            --build-arg GIT_COMMIT="$(git -C upstream rev-parse HEAD)" \
+            --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+            --label org.opencontainers.image.version="$VERSION" \
+            --label org.opencontainers.image.revision="$(git -C upstream rev-parse HEAD)" \
+            -t "$IMAGE:$VERSION" upstream
+
+      # The slim image deletes packages, so prove nothing the services import
+      # went with them: every import upstream's own api image resolves for this
+      # release must resolve here too. See `scripts/fork-backend-check.mjs`.
+      - name: Check imports against upstream's image
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker pull --quiet "$UPSTREAM_IMAGES/api:$VERSION"
+          check() {
+            docker run --rm -v "$PWD/fork/scripts/fork-backend-check.mjs:/tmp/check.mjs:ro" \
+              --entrypoint node "$1" --experimental-import-meta-resolve /tmp/check.mjs
+          }
+          check "$UPSTREAM_IMAGES/api:$VERSION" > stock.txt
+          check "$IMAGE:$VERSION" > slim.txt
+          if comm -13 stock.txt slim.txt | grep .; then
+            echo "::error::the imports above resolve in upstream's image and not in the slim one"
+            exit 1
+          fi
+          for app in api collector query-gateway realtime worker; do
+            docker run --rm --entrypoint test "$IMAGE:$VERSION" -s "apps/$app/dist/main.js"
+          done
+          docker run --rm --entrypoint test "$IMAGE:$VERSION" -s apps/tracker/bundle/oa.js
+
+      - name: Push
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker push "$IMAGE:$VERSION"
+          {
+            echo "### $IMAGE:$VERSION"
+            echo
+            echo "| Image | Size |"
+            echo "| --- | --- |"
+            echo "| upstream api:$VERSION | $(docker image inspect -f '{{.Size}}' "$UPSTREAM_IMAGES/api:$VERSION" | numfmt --to=iec) |"
+            echo "| backend:$VERSION | $(docker image inspect -f '{{.Size}}' "$IMAGE:$VERSION" | numfmt --to=iec) |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,59 @@
+# fork: the stages that turn upstream's node-app.Dockerfile into one slim image
+# for every backend service. Not a Dockerfile on its own.
+#
+# `.github/workflows/fork-backend-image.yml` (and `fork-backend-dockerfile.sh`
+# for a local build) takes `infra/docker/node-app.Dockerfile` from the upstream
+# release being built, cuts it at `# ---- runtime`, and appends this file. The
+# `base`, `deps` and `build` stages therefore always come from that exact
+# release, and a sync with upstream never conflicts here.
+#
+# Why: upstream's `runtime` copies `/repo` after a full workspace install, so
+# every backend image carries ~813 MB of `node_modules`, mostly the dashboard
+# (next, three icon sets, maplibre) and the build and test tools, none of which
+# a backend service opens. Six such images are built with separate cache
+# scopes and share no layers: ~1 GB each on disk.
+
+# The production dependencies of the five backend apps and their workspace
+# packages, in place of the full install. Every other path stays where
+# `runtime` has it: `dist/`, the migration SQL the CLIs read from
+# `packages/*/migrations`, and `apps/tracker/bundle/oa.js`, which the collector
+# resolves relative to its own `dist/`.
+#
+# `--offline` because the store from `deps` is already in this stage; a package
+# missing from it is a lockfile problem and should fail here, not download.
+#
+# That still leaves ~450 MB the services never load: `better-auth` (in
+# `packages/auth`) declares next, react and vitest as optional peers, and
+# because the dashboard installs them pnpm links them in, with sharp, babel,
+# esbuild, rolldown, lightningcss and happy-dom behind them. They are deleted
+# by name rather than by "anything unreached", because a package loaded by a
+# computed `import()` would look unreached too. `scripts/fork-backend-check.mjs`
+# proves the deletion: nothing upstream's own image resolves may fail here.
+FROM build AS backend-prune
+RUN rm -rf node_modules apps/*/node_modules packages/*/node_modules \
+  && pnpm install --prod --frozen-lockfile --offline \
+    --filter '@openanalytics/api...' \
+    --filter '@openanalytics/collector...' \
+    --filter '@openanalytics/query-gateway...' \
+    --filter '@openanalytics/realtime...' \
+    --filter '@openanalytics/worker...' \
+  && cd node_modules/.pnpm \
+  && rm -rf next@* @next+* react@* react-dom@* scheduler@* styled-jsx@* @swc+* \
+    caniuse-lite@* sharp@* @img+* happy-dom@* vitest@* @vitest+* vite@* \
+    rolldown@* @rolldown+* esbuild@* @esbuild+* lightningcss* @babel+* jiti@* \
+    @types+*
+
+# The bare node image rather than `base`: nothing at run time calls pnpm.
+# `__NODE_IMAGE__` is replaced with the image upstream's `base` stage names, so
+# a Node bump upstream reaches this stage without an edit here. One image
+# serves all six backend services, so `APP_MAIN` has no default and the compose
+# file sets it per service; migrate ignores it because its entrypoint names its
+# own scripts.
+FROM __NODE_IMAGE__ AS backend
+ENV NODE_ENV=production
+COPY --from=backend-prune /repo /repo
+WORKDIR /repo
+USER node
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+CMD ["sh", "-c", "test -n \"$APP_MAIN\" || { echo 'APP_MAIN is required' >&2; exit 1; }; exec node \"$APP_MAIN\""]
